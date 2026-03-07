@@ -1,7 +1,10 @@
 # CNflick
 
 兼顾效率和准度，理论最优的手机中文输入法。
-作者 B站主页：[https://m.bilibili.com/space/431314757?spm_id_from=333.1369.opus.module_author_avatar.click](https://m.bilibili.com/space/431314757?spm_id_from=333.1369.opus.module_author_avatar.click)
+ 
+开发者：忧郁乔班尼。
+B站主页：
+[https://m.bilibili.com/space/431314757?spm_id_from=333.1369.opus.module_author_avatar.click](https://m.bilibili.com/space/431314757?spm_id_from=333.1369.opus.module_author_avatar.click)
 
 ## 项目简介
 CNflick 是一个 Android 自定义输入法项目，核心是 12 键 Flick 输入：
