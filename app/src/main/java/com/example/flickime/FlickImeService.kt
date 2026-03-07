@@ -3,6 +3,7 @@ package com.example.flickime
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
@@ -81,6 +82,7 @@ class FlickImeService : InputMethodService() {
     private var colWidth = 0
     private var rowHeight = 0
     private var rowGap = 0
+    private var candidateStripHeight = 0
     private var alphaCapsLock = false
     private val clipboardHistory = mutableListOf<String>()
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener { captureSystemClipboard() }
@@ -185,15 +187,25 @@ class FlickImeService : InputMethodService() {
     }
 
     private fun initDimensions() {
-        val screenWidth = resources.displayMetrics.widthPixels
+        val dm = resources.displayMetrics
+        val screenWidth = dm.widthPixels
+        val screenHeight = dm.heightPixels
+        val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+
         val outerPadding = dp(8)
         rowGap = dp(4)
+        candidateStripHeight = if (isLandscape) dp(40) else dp(50)
 
         val usable = screenWidth - outerPadding
         colWidth = ((usable - rowGap * 4) / 5f).toInt().coerceAtLeast(dp(54))
 
         val centerSquare = colWidth * 3 + rowGap * 2
-        rowHeight = ((centerSquare - rowGap * 3) / 4f).toInt().coerceAtLeast(dp(46))
+        val widthBasedRow = ((centerSquare - rowGap * 3) / 4f).toInt()
+        val maxKeyboardRatio = if (isLandscape) 0.42f else 0.60f
+        val maxKeyboardHeight = (screenHeight * maxKeyboardRatio).toInt()
+        val heightBasedRow = ((maxKeyboardHeight - rowGap * 4 - dp(6)) / 5f).toInt()
+        val minRow = if (isLandscape) dp(32) else dp(46)
+        rowHeight = minOf(widthBasedRow, heightBasedRow).coerceAtLeast(minRow)
     }
 
     private fun keyboardHeight(): Int = rowHeight * 5 + rowGap * 4 + dp(6)
@@ -203,7 +215,7 @@ class FlickImeService : InputMethodService() {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(Color.parseColor("#D5DCE6"))
             setPadding(dp(8), dp(4), dp(8), dp(4))
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(50))
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, candidateStripHeight)
         }
 
         composingView = TextView(this).apply {
