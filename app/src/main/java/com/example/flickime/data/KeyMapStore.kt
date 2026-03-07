@@ -6,9 +6,12 @@ import com.example.flickime.model.FlickKeySpec
 
 object KeyMapStore {
     private const val PREFS = "flick_keymap"
+    private const val PINYIN_SCHEMA_VERSION = "pinyin_schema_version"
+    private const val PINYIN_SCHEMA_V2 = 2
 
     fun loadPinyinKeys(context: Context): List<FlickKeySpec> {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        ensurePinyinSchema(prefs, context)
         return DefaultKeyMap.keys.mapIndexed { index, def ->
             FlickKeySpec(
                 center = prefs.getString("pinyin_${index}_center", def.center).orEmpty(),
@@ -32,6 +35,25 @@ object KeyMapStore {
             editor.putString("pinyin_${index}_down", k.down.trim().lowercase())
         }
         editor.apply()
+    }
+
+    private fun ensurePinyinSchema(prefs: android.content.SharedPreferences, context: Context) {
+        val current = prefs.getInt(PINYIN_SCHEMA_VERSION, 0)
+        if (current >= PINYIN_SCHEMA_V2) return
+
+        val old12Left = prefs.getString("pinyin_11_left", null)
+        val old12Up = prefs.getString("pinyin_11_up", null)
+        val old12Right = prefs.getString("pinyin_11_right", null)
+        val looksLegacyUmlaut = old12Left == "üe" || old12Up == "ün" || old12Right == "üan"
+
+        val key5Right = prefs.getString("pinyin_4_right", null)
+        val key5Down = prefs.getString("pinyin_4_down", null)
+        val looksLegacyPunc = key5Right == "，" || key5Down == "。"
+
+        if (looksLegacyUmlaut || looksLegacyPunc) {
+            savePinyinKeys(context, DefaultKeyMap.keys)
+        }
+        prefs.edit().putInt(PINYIN_SCHEMA_VERSION, PINYIN_SCHEMA_V2).apply()
     }
 
     fun loadSymbolKeys(context: Context): List<DirectionalKeySpec> {

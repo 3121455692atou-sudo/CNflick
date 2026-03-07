@@ -32,6 +32,7 @@ import com.example.flickime.engine.PinyinEngine
 import com.example.flickime.model.FlickDirection
 import com.example.flickime.model.FlickKeySpec
 import com.example.flickime.model.KeyZone
+import java.util.Locale
 import kotlin.math.abs
 
 class FlickImeService : InputMethodService() {
@@ -997,13 +998,20 @@ class FlickImeService : InputMethodService() {
     }
 
     private fun onPinyinFlick(zone: KeyZone, text: String) {
-        if (text == "，" || text == "。") {
+        if (isPunctuationToken(text)) {
             commitTextSafe(text)
             resetComposing()
             return
         }
 
-        when (zone) {
+        // 部分音节（如 ü/v）被放到声母区时，按韵母逻辑处理，允许首音节直接输入。
+        val actualZone = if (zone == KeyZone.Shengmu && isYunmuLikeToken(text)) {
+            KeyZone.Yunmu
+        } else {
+            zone
+        }
+
+        when (actualZone) {
             KeyZone.Shengmu -> {
                 shengmuPart = text
                 composingText = buildComposingDisplay()
@@ -1035,6 +1043,17 @@ class FlickImeService : InputMethodService() {
         }
 
         refreshCandidateViews()
+    }
+
+    private fun isPunctuationToken(text: String): Boolean {
+        return text in setOf("，", "。", "？", "！", ",", ".", "?", "!")
+    }
+
+    private fun isYunmuLikeToken(text: String): Boolean {
+        if (text.isBlank()) return false
+        val t = text.lowercase(Locale.getDefault())
+            .replace("ü", "v")
+        return t == "v" || t == "er" || t.firstOrNull() in listOf('a', 'e', 'i', 'o', 'u')
     }
 
     private fun switchMode(target: Mode) {
