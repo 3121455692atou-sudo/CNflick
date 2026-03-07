@@ -1,0 +1,50 @@
+name: CNflickiOS
+options:
+  deploymentTarget:
+    iOS: "16.0"
+settings:
+  base:
+    PRODUCT_BUNDLE_IDENTIFIER: com.cnflick.ios
+    DEVELOPMENT_TEAM: ""
+    SWIFT_VERSION: 5.0
+    TARGETED_DEVICE_FAMILY: "1,2"
+packages: {}
+targets:
+  CNflickApp:
+    type: application
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: CNflickApp
+    info:
+      path: CNflickApp/Info.plist
+      properties:
+        CFBundleDisplayName: CNflick
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.cnflick.ios
+    dependencies:
+      - target: CNflickKeyboard
+        embed: true
+  CNflickKeyboard:
+    type: app-extension
+    platform: iOS
+    deploymentTarget: "16.0"
+    sources:
+      - path: CNflickKeyboard
+    info:
+      path: CNflickKeyboard/Info.plist
+      properties:
+        CFBundleDisplayName: CNflick Keyboard
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.keyboard-service
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).KeyboardViewController
+          RequestsOpenAccess: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.cnflick.ios.keyboard

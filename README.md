@@ -31,6 +31,7 @@ APK 下载（GitHub Release）：
 - `app/src/main/java/com/example/flickime/ImeSettingsActivity.kt`：设置页
 - `app/src/main/java/com/example/flickime/KeyMappingActivity.kt`：12 键映射编辑 + JSON 导入导出
 - `app/src/main/java/com/example/flickime/data/KeyMapStore.kt`：映射持久化
+- `ios/CNflick-iOS/`：iOS 版本（App + Keyboard Extension）
 
 ## 映射导入/导出 JSON
 设置 -> 自定义按键映射：
