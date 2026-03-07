@@ -7,7 +7,7 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:label="@string/app_name"
         android:supportsRtl="true"
-        android:theme="@style/Theme.FlickIME">
+        android:theme="@style/Theme.CNflick">
 
         <activity
             android:name=".MainActivity"

@@ -49,9 +49,9 @@ private fun SetupScreen() {
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        Text(text = "FlickIME 安装指引", fontSize = 26.sp)
-        Text(text = "1. 点击“启用输入法”进入系统设置，打开 FlickIME")
-        Text(text = "2. 回来后点击“切换输入法”选择 FlickIME")
+        Text(text = "CNflick 安装指引", fontSize = 26.sp)
+        Text(text = "1. 点击“启用输入法”进入系统设置，打开 CNflick")
+        Text(text = "2. 回来后点击“切换输入法”选择 CNflick")
         Text(text = "3. 在任意输入框测试：先滑声母，再滑韵母，点候选上屏")
 
         OutlinedTextField(

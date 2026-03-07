@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "FlickIME"
+rootProject.name = "CNflick"
 include(":app")
