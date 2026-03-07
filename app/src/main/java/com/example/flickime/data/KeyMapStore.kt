@@ -34,6 +34,7 @@ object KeyMapStore {
             editor.putString("pinyin_${index}_right", k.right.trim().lowercase())
             editor.putString("pinyin_${index}_down", k.down.trim().lowercase())
         }
+        editor.putInt(PINYIN_SCHEMA_VERSION, PINYIN_SCHEMA_V2)
         editor.apply()
     }
 
@@ -41,14 +42,15 @@ object KeyMapStore {
         val current = prefs.getInt(PINYIN_SCHEMA_VERSION, 0)
         if (current >= PINYIN_SCHEMA_V2) return
 
+        val key12Center = prefs.getString("pinyin_11_center", null)
         val old12Left = prefs.getString("pinyin_11_left", null)
         val old12Up = prefs.getString("pinyin_11_up", null)
         val old12Right = prefs.getString("pinyin_11_right", null)
-        val looksLegacyUmlaut = old12Left == "üe" || old12Up == "ün" || old12Right == "üan"
+        val looksLegacyUmlaut = key12Center == "ü" && old12Left == "üe" && old12Up == "ün" && old12Right == "üan"
 
         val key5Right = prefs.getString("pinyin_4_right", null)
         val key5Down = prefs.getString("pinyin_4_down", null)
-        val looksLegacyPunc = key5Right == "，" || key5Down == "。"
+        val looksLegacyPunc = key5Right == "，" && key5Down == "。"
 
         if (looksLegacyUmlaut || looksLegacyPunc) {
             savePinyinKeys(context, DefaultKeyMap.keys)

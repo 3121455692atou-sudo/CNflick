@@ -15,6 +15,7 @@ import android.os.Vibrator
 import android.os.VibratorManager
 import android.text.TextUtils
 import android.view.inputmethod.InputMethodManager
+import android.view.inputmethod.EditorInfo
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
@@ -184,6 +185,11 @@ class FlickImeService : InputMethodService() {
         refreshCandidateViews()
         refreshModeSwitchStyles()
         return root
+    }
+
+    override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
+        super.onStartInputView(info, restarting)
+        rebuildPanelsFromSettings()
     }
 
     private fun initDimensions() {
@@ -465,6 +471,40 @@ class FlickImeService : InputMethodService() {
         rows.forEachIndexed { index, rowViews -> panel.addView(makeFixedRow(rowViews, index != rows.lastIndex)) }
         panel.addView(buildBottomUtilityBar())
         return panel
+    }
+
+    private fun rebuildPanelsFromSettings() {
+        if (!::keyboardContainer.isInitialized) return
+        modeSwitchViews.clear()
+        val currentMode = mode
+
+        val newFlick = buildFlickPanel()
+        val newAlpha = buildAlphaPanel()
+        val newNum = buildNumPanel()
+        val newSymbol = buildSymbolPanel()
+        val newCandidate = buildCandidatePanel()
+        val newFunc = buildFunctionPanel()
+        val newClipboard = buildClipboardPanel()
+
+        keyboardContainer.removeAllViews()
+        flickPanel = newFlick
+        alphaPanel = newAlpha
+        numPanel = newNum
+        symbolPanel = newSymbol
+        candidatePanel = newCandidate
+        funcPanel = newFunc
+        clipboardPanel = newClipboard
+
+        keyboardContainer.addView(flickPanel)
+        keyboardContainer.addView(alphaPanel)
+        keyboardContainer.addView(numPanel)
+        keyboardContainer.addView(symbolPanel)
+        keyboardContainer.addView(candidatePanel)
+        keyboardContainer.addView(funcPanel)
+        keyboardContainer.addView(clipboardPanel)
+
+        mode = currentMode
+        switchMode(currentMode)
     }
 
     private fun buildBottomUtilityBar(): View {
