@@ -1,6 +1,9 @@
 # CNflick 发布说明
 
 ## v0.1.0
+APK 下载：
+- https://github.com/3121455692atou-sudo/CNflick/releases/download/v0.1.0/CNflick-debug.apk
+
 - 12 键 Flick 中文输入
 - 候选栏 + 候选展开页
 - 动态调频（用户选词置顶）
