@@ -40,6 +40,9 @@ JSON 结构（长度 12 的数组，每项 5 向）：
 ]
 ```
 
+## 主题包文档
+- `docs/THEME_PACK.md`：主题包制作方式与制作规范（格式、字段、打包、导入）
+
 ## 构建
 ```bash
 ./gradlew :app:assembleDebug
