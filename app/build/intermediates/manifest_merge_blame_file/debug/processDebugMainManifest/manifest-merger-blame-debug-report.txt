@@ -1,0 +1,175 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="com.example.flickime"
+4    android:versionCode="1"
+5    android:versionName="1.0" >
+6
+7    <uses-sdk
+8        android:minSdkVersion="26"
+9        android:targetSdkVersion="35" />
+10
+11    <permission
+11-->[androidx.core:core:1.15.0] /Users/mac/.gradle/caches/transforms-4/8bb8a3a7ca48bae1db358a872d31f1aa/transformed/core-1.15.0/AndroidManifest.xml:22:5-24:47
+12        android:name="com.example.flickime.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+12-->[androidx.core:core:1.15.0] /Users/mac/.gradle/caches/transforms-4/8bb8a3a7ca48bae1db358a872d31f1aa/transformed/core-1.15.0/AndroidManifest.xml:23:9-81
+13        android:protectionLevel="signature" />
+13-->[androidx.core:core:1.15.0] /Users/mac/.gradle/caches/transforms-4/8bb8a3a7ca48bae1db358a872d31f1aa/transformed/core-1.15.0/AndroidManifest.xml:24:9-44
+14
+15    <uses-permission android:name="com.example.flickime.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
+15-->[androidx.core:core:1.15.0] /Users/mac/.gradle/caches/transforms-4/8bb8a3a7ca48bae1db358a872d31f1aa/transformed/core-1.15.0/AndroidManifest.xml:26:5-97
+15-->[androidx.core:core:1.15.0] /Users/mac/.gradle/caches/transforms-4/8bb8a3a7ca48bae1db358a872d31f1aa/transformed/core-1.15.0/AndroidManifest.xml:26:22-94
+16
+17    <application
+17-->/Users/mac/Documents/flick/app/src/main/AndroidManifest.xml:4:5-41:19
+18        android:allowBackup="true"
+18-->/Users/mac/Documents/flick/app/src/main/AndroidManifest.xml:5:9-35
+19        android:appComponentFactory="androidx.core.app.CoreComponentFactory"
+19-->[androidx.core:core:1.15.0] /Users/mac/.gradle/caches/transforms-4/8bb8a3a7ca48bae1db358a872d31f1aa/transformed/core-1.15.0/AndroidManifest.xml:28:18-86
+20        android:debuggable="true"
+21        android:extractNativeLibs="false"
+22        android:icon="@mipmap/ic_launcher"
+22-->/Users/mac/Documents/flick/app/src/main/AndroidManifest.xml:6:9-43
+23        android:label="@string/app_name"
+23-->/Users/mac/Documents/flick/app/src/main/AndroidManifest.xml:8:9-41
+24        android:roundIcon="@mipmap/ic_launcher_round"
+24-->/Users/mac/Documents/flick/app/src/main/AndroidManifest.xml:7:9-54
+25        android:supportsRtl="true"
+25-->/Users/mac/Documents/flick/app/src/main/AndroidManifest.xml:9:9-35
+26        android:theme="@style/Theme.FlickIME" >
+26-->/Users/mac/Documents/flick/app/src/main/AndroidManifest.xml:10:9-46
+27        <activity
+27-->/Users/mac/Documents/flick/app/src/main/AndroidManifest.xml:12:9-19:20
+28            android:name="com.example.flickime.MainActivity"
+28-->/Users/mac/Documents/flick/app/src/main/AndroidManifest.xml:13:13-41
+29            android:exported="true" >
+29-->/Users/mac/Documents/flick/app/src/main/AndroidManifest.xml:14:13-36
+30            <intent-filter>
+30-->/Users/mac/Documents/flick/app/src/main/AndroidManifest.xml:15:13-18:29
+31                <action android:name="android.intent.action.MAIN" />
+31-->/Users/mac/Documents/flick/app/src/main/AndroidManifest.xml:16:17-69
+31-->/Users/mac/Documents/flick/app/src/main/AndroidManifest.xml:16:25-66
+32
+33                <category android:name="android.intent.category.LAUNCHER" />
+33-->/Users/mac/Documents/flick/app/src/main/AndroidManifest.xml:17:17-77
+33-->/Users/mac/Documents/flick/app/src/main/AndroidManifest.xml:17:27-74
+34            </intent-filter>
+35        </activity>
+36        <activity
+36-->/Users/mac/Documents/flick/app/src/main/AndroidManifest.xml:21:9-23:40
+37            android:name="com.example.flickime.ImeSettingsActivity"
+37-->/Users/mac/Documents/flick/app/src/main/AndroidManifest.xml:22:13-48
+38            android:exported="false" />
+38-->/Users/mac/Documents/flick/app/src/main/AndroidManifest.xml:23:13-37
+39        <activity
+39-->/Users/mac/Documents/flick/app/src/main/AndroidManifest.xml:25:9-27:40
+40            android:name="com.example.flickime.KeyMappingActivity"
+40-->/Users/mac/Documents/flick/app/src/main/AndroidManifest.xml:26:13-47
+41            android:exported="false" />
+41-->/Users/mac/Documents/flick/app/src/main/AndroidManifest.xml:27:13-37
+42
+43        <service
+43-->/Users/mac/Documents/flick/app/src/main/AndroidManifest.xml:29:9-40:19
+44            android:name="com.example.flickime.FlickImeService"
+44-->/Users/mac/Documents/flick/app/src/main/AndroidManifest.xml:30:13-44
+45            android:exported="true"
+45-->/Users/mac/Documents/flick/app/src/main/AndroidManifest.xml:31:13-36
+46            android:label="@string/app_name"
+46-->/Users/mac/Documents/flick/app/src/main/AndroidManifest.xml:32:13-45
+47            android:permission="android.permission.BIND_INPUT_METHOD" >
+47-->/Users/mac/Documents/flick/app/src/main/AndroidManifest.xml:33:13-70
+48            <intent-filter>
+48-->/Users/mac/Documents/flick/app/src/main/AndroidManifest.xml:34:13-36:29
+49                <action android:name="android.view.InputMethod" />
+49-->/Users/mac/Documents/flick/app/src/main/AndroidManifest.xml:35:17-67
+49-->/Users/mac/Documents/flick/app/src/main/AndroidManifest.xml:35:25-64
+50            </intent-filter>
+51
+52            <meta-data
+52-->/Users/mac/Documents/flick/app/src/main/AndroidManifest.xml:37:13-39:50
+53                android:name="android.view.im"
+53-->/Users/mac/Documents/flick/app/src/main/AndroidManifest.xml:38:17-47
+54                android:resource="@xml/method" />
+54-->/Users/mac/Documents/flick/app/src/main/AndroidManifest.xml:39:17-47
+55        </service>
+56
+57        <activity
+57-->[androidx.compose.ui:ui-tooling-android:1.7.6] /Users/mac/.gradle/caches/transforms-4/325412109b0e86f4fe2e39f6cb705182/transformed/ui-tooling-release/AndroidManifest.xml:23:9-25:39
+58            android:name="androidx.compose.ui.tooling.PreviewActivity"
+58-->[androidx.compose.ui:ui-tooling-android:1.7.6] /Users/mac/.gradle/caches/transforms-4/325412109b0e86f4fe2e39f6cb705182/transformed/ui-tooling-release/AndroidManifest.xml:24:13-71
+59            android:exported="true" />
+59-->[androidx.compose.ui:ui-tooling-android:1.7.6] /Users/mac/.gradle/caches/transforms-4/325412109b0e86f4fe2e39f6cb705182/transformed/ui-tooling-release/AndroidManifest.xml:25:13-36
+60        <activity
+60-->[androidx.compose.ui:ui-test-manifest:1.7.6] /Users/mac/.gradle/caches/transforms-4/304ad0212dbb7364f9c87c747f3e5db0/transformed/ui-test-manifest-1.7.6/AndroidManifest.xml:23:9-25:39
+61            android:name="androidx.activity.ComponentActivity"
+61-->[androidx.compose.ui:ui-test-manifest:1.7.6] /Users/mac/.gradle/caches/transforms-4/304ad0212dbb7364f9c87c747f3e5db0/transformed/ui-test-manifest-1.7.6/AndroidManifest.xml:24:13-63
+62            android:exported="true" />
+62-->[androidx.compose.ui:ui-test-manifest:1.7.6] /Users/mac/.gradle/caches/transforms-4/304ad0212dbb7364f9c87c747f3e5db0/transformed/ui-test-manifest-1.7.6/AndroidManifest.xml:25:13-36
+63
+64        <provider
+64-->[androidx.emoji2:emoji2:1.3.0] /Users/mac/.gradle/caches/transforms-4/0234fdbfadf489cdd91f803378fbedc5/transformed/emoji2-1.3.0/AndroidManifest.xml:24:9-32:20
+65            android:name="androidx.startup.InitializationProvider"
+65-->[androidx.emoji2:emoji2:1.3.0] /Users/mac/.gradle/caches/transforms-4/0234fdbfadf489cdd91f803378fbedc5/transformed/emoji2-1.3.0/AndroidManifest.xml:25:13-67
+66            android:authorities="com.example.flickime.androidx-startup"
+66-->[androidx.emoji2:emoji2:1.3.0] /Users/mac/.gradle/caches/transforms-4/0234fdbfadf489cdd91f803378fbedc5/transformed/emoji2-1.3.0/AndroidManifest.xml:26:13-68
+67            android:exported="false" >
+67-->[androidx.emoji2:emoji2:1.3.0] /Users/mac/.gradle/caches/transforms-4/0234fdbfadf489cdd91f803378fbedc5/transformed/emoji2-1.3.0/AndroidManifest.xml:27:13-37
+68            <meta-data
+68-->[androidx.emoji2:emoji2:1.3.0] /Users/mac/.gradle/caches/transforms-4/0234fdbfadf489cdd91f803378fbedc5/transformed/emoji2-1.3.0/AndroidManifest.xml:29:13-31:52
+69                android:name="androidx.emoji2.text.EmojiCompatInitializer"
+69-->[androidx.emoji2:emoji2:1.3.0] /Users/mac/.gradle/caches/transforms-4/0234fdbfadf489cdd91f803378fbedc5/transformed/emoji2-1.3.0/AndroidManifest.xml:30:17-75
+70                android:value="androidx.startup" />
+70-->[androidx.emoji2:emoji2:1.3.0] /Users/mac/.gradle/caches/transforms-4/0234fdbfadf489cdd91f803378fbedc5/transformed/emoji2-1.3.0/AndroidManifest.xml:31:17-49
+71            <meta-data
+71-->[androidx.lifecycle:lifecycle-process:2.8.7] /Users/mac/.gradle/caches/transforms-4/fd898bcd0e8d4ec374e3d501e93fe159/transformed/lifecycle-process-2.8.7/AndroidManifest.xml:29:13-31:52
+72                android:name="androidx.lifecycle.ProcessLifecycleInitializer"
+72-->[androidx.lifecycle:lifecycle-process:2.8.7] /Users/mac/.gradle/caches/transforms-4/fd898bcd0e8d4ec374e3d501e93fe159/transformed/lifecycle-process-2.8.7/AndroidManifest.xml:30:17-78
+73                android:value="androidx.startup" />
+73-->[androidx.lifecycle:lifecycle-process:2.8.7] /Users/mac/.gradle/caches/transforms-4/fd898bcd0e8d4ec374e3d501e93fe159/transformed/lifecycle-process-2.8.7/AndroidManifest.xml:31:17-49
+74            <meta-data
+74-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/mac/.gradle/caches/transforms-4/46ffc5c2563383ff37a2a930040ea762/transformed/profileinstaller-1.4.0/AndroidManifest.xml:29:13-31:52
+75                android:name="androidx.profileinstaller.ProfileInstallerInitializer"
+75-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/mac/.gradle/caches/transforms-4/46ffc5c2563383ff37a2a930040ea762/transformed/profileinstaller-1.4.0/AndroidManifest.xml:30:17-85
+76                android:value="androidx.startup" />
+76-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/mac/.gradle/caches/transforms-4/46ffc5c2563383ff37a2a930040ea762/transformed/profileinstaller-1.4.0/AndroidManifest.xml:31:17-49
+77        </provider>
+78
+79        <receiver
+79-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/mac/.gradle/caches/transforms-4/46ffc5c2563383ff37a2a930040ea762/transformed/profileinstaller-1.4.0/AndroidManifest.xml:34:9-52:20
+80            android:name="androidx.profileinstaller.ProfileInstallReceiver"
+80-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/mac/.gradle/caches/transforms-4/46ffc5c2563383ff37a2a930040ea762/transformed/profileinstaller-1.4.0/AndroidManifest.xml:35:13-76
+81            android:directBootAware="false"
+81-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/mac/.gradle/caches/transforms-4/46ffc5c2563383ff37a2a930040ea762/transformed/profileinstaller-1.4.0/AndroidManifest.xml:36:13-44
+82            android:enabled="true"
+82-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/mac/.gradle/caches/transforms-4/46ffc5c2563383ff37a2a930040ea762/transformed/profileinstaller-1.4.0/AndroidManifest.xml:37:13-35
+83            android:exported="true"
+83-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/mac/.gradle/caches/transforms-4/46ffc5c2563383ff37a2a930040ea762/transformed/profileinstaller-1.4.0/AndroidManifest.xml:38:13-36
+84            android:permission="android.permission.DUMP" >
+84-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/mac/.gradle/caches/transforms-4/46ffc5c2563383ff37a2a930040ea762/transformed/profileinstaller-1.4.0/AndroidManifest.xml:39:13-57
+85            <intent-filter>
+85-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/mac/.gradle/caches/transforms-4/46ffc5c2563383ff37a2a930040ea762/transformed/profileinstaller-1.4.0/AndroidManifest.xml:40:13-42:29
+86                <action android:name="androidx.profileinstaller.action.INSTALL_PROFILE" />
+86-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/mac/.gradle/caches/transforms-4/46ffc5c2563383ff37a2a930040ea762/transformed/profileinstaller-1.4.0/AndroidManifest.xml:41:17-91
+86-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/mac/.gradle/caches/transforms-4/46ffc5c2563383ff37a2a930040ea762/transformed/profileinstaller-1.4.0/AndroidManifest.xml:41:25-88
+87            </intent-filter>
+88            <intent-filter>
+88-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/mac/.gradle/caches/transforms-4/46ffc5c2563383ff37a2a930040ea762/transformed/profileinstaller-1.4.0/AndroidManifest.xml:43:13-45:29
+89                <action android:name="androidx.profileinstaller.action.SKIP_FILE" />
+89-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/mac/.gradle/caches/transforms-4/46ffc5c2563383ff37a2a930040ea762/transformed/profileinstaller-1.4.0/AndroidManifest.xml:44:17-85
+89-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/mac/.gradle/caches/transforms-4/46ffc5c2563383ff37a2a930040ea762/transformed/profileinstaller-1.4.0/AndroidManifest.xml:44:25-82
+90            </intent-filter>
+91            <intent-filter>
+91-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/mac/.gradle/caches/transforms-4/46ffc5c2563383ff37a2a930040ea762/transformed/profileinstaller-1.4.0/AndroidManifest.xml:46:13-48:29
+92                <action android:name="androidx.profileinstaller.action.SAVE_PROFILE" />
+92-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/mac/.gradle/caches/transforms-4/46ffc5c2563383ff37a2a930040ea762/transformed/profileinstaller-1.4.0/AndroidManifest.xml:47:17-88
+92-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/mac/.gradle/caches/transforms-4/46ffc5c2563383ff37a2a930040ea762/transformed/profileinstaller-1.4.0/AndroidManifest.xml:47:25-85
+93            </intent-filter>
+94            <intent-filter>
+94-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/mac/.gradle/caches/transforms-4/46ffc5c2563383ff37a2a930040ea762/transformed/profileinstaller-1.4.0/AndroidManifest.xml:49:13-51:29
+95                <action android:name="androidx.profileinstaller.action.BENCHMARK_OPERATION" />
+95-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/mac/.gradle/caches/transforms-4/46ffc5c2563383ff37a2a930040ea762/transformed/profileinstaller-1.4.0/AndroidManifest.xml:50:17-95
+95-->[androidx.profileinstaller:profileinstaller:1.4.0] /Users/mac/.gradle/caches/transforms-4/46ffc5c2563383ff37a2a930040ea762/transformed/profileinstaller-1.4.0/AndroidManifest.xml:50:25-92
+96            </intent-filter>
+97        </receiver>
+98    </application>
+99
+100</manifest>
