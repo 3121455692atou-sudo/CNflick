@@ -533,7 +533,10 @@ class FlickImeService : InputMethodService() {
     }
 
     private fun pinyinFlickKey(spec: FlickKeySpec): View {
-        val showSideHints = isPinyinSideHintsEnabled()
+        val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val centerSize = if (isLandscape) 15f else 18f
+        val sideSize = if (isLandscape) 9f else 10f
+        val verticalEdgeMargin = if (isLandscape) dp(1) else dp(3)
         val visual = DirectionalSpec(
             spec.center.lowercase(),
             spec.left.lowercase(),
@@ -547,46 +550,44 @@ class FlickImeService : InputMethodService() {
         }
         key.addView(TextView(this).apply {
             text = visual.center
-            textSize = 18f
+            textSize = centerSize
             setTypeface(typeface, Typeface.BOLD)
             setTextColor(Color.parseColor("#111827"))
             gravity = Gravity.CENTER
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
         })
-        if (showSideHints) {
-            key.addView(TextView(this).apply {
-                text = visual.left
-                textSize = 10f
-                setTextColor(Color.parseColor("#4B5563"))
-                layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.START or Gravity.CENTER_VERTICAL).apply {
-                    marginStart = dp(4)
-                }
-            })
-            key.addView(TextView(this).apply {
-                text = visual.up
-                textSize = 10f
-                setTextColor(Color.parseColor("#4B5563"))
-                layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
-                    topMargin = dp(3)
-                }
-            })
-            key.addView(TextView(this).apply {
-                text = visual.right
-                textSize = 10f
-                setTextColor(Color.parseColor("#4B5563"))
-                layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.END or Gravity.CENTER_VERTICAL).apply {
-                    marginEnd = dp(4)
-                }
-            })
-            key.addView(TextView(this).apply {
-                text = visual.down
-                textSize = 10f
-                setTextColor(Color.parseColor("#4B5563"))
-                layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
-                    bottomMargin = dp(3)
-                }
-            })
-        }
+        key.addView(TextView(this).apply {
+            text = visual.left
+            textSize = sideSize
+            setTextColor(Color.parseColor("#4B5563"))
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.START or Gravity.CENTER_VERTICAL).apply {
+                marginStart = dp(4)
+            }
+        })
+        key.addView(TextView(this).apply {
+            text = visual.up
+            textSize = sideSize
+            setTextColor(Color.parseColor("#4B5563"))
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
+                topMargin = verticalEdgeMargin
+            }
+        })
+        key.addView(TextView(this).apply {
+            text = visual.right
+            textSize = sideSize
+            setTextColor(Color.parseColor("#4B5563"))
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.END or Gravity.CENTER_VERTICAL).apply {
+                marginEnd = dp(4)
+            }
+        })
+        key.addView(TextView(this).apply {
+            text = visual.down
+            textSize = sideSize
+            setTextColor(Color.parseColor("#4B5563"))
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+                bottomMargin = verticalEdgeMargin
+            }
+        })
 
         var startX = 0f
         var startY = 0f
@@ -629,53 +630,54 @@ class FlickImeService : InputMethodService() {
     }
 
     private fun symbolFlickKey(spec: DirectionalSpec): View {
-        val showSideHints = isSymbolSideHintsEnabled()
+        val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val centerSize = if (isLandscape) 15f else 18f
+        val sideSize = if (isLandscape) 9f else 10f
+        val verticalEdgeMargin = if (isLandscape) dp(1) else dp(3)
         val key = FrameLayout(this).apply {
             background = keyBackground(Color.parseColor("#EEF1F5"), Color.parseColor("#A6AFBC"))
             isClickable = true
         }
         key.addView(TextView(this).apply {
             text = spec.center
-            textSize = 18f
+            textSize = centerSize
             setTypeface(typeface, Typeface.BOLD)
             setTextColor(Color.parseColor("#111827"))
             gravity = Gravity.CENTER
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
         })
-        if (showSideHints) {
-            key.addView(TextView(this).apply {
-                text = spec.left
-                textSize = 10f
-                setTextColor(Color.parseColor("#4B5563"))
-                layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.START or Gravity.CENTER_VERTICAL).apply {
-                    marginStart = dp(4)
-                }
-            })
-            key.addView(TextView(this).apply {
-                text = spec.up
-                textSize = 10f
-                setTextColor(Color.parseColor("#4B5563"))
-                layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
-                    topMargin = dp(3)
-                }
-            })
-            key.addView(TextView(this).apply {
-                text = spec.right
-                textSize = 10f
-                setTextColor(Color.parseColor("#4B5563"))
-                layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.END or Gravity.CENTER_VERTICAL).apply {
-                    marginEnd = dp(4)
-                }
-            })
-            key.addView(TextView(this).apply {
-                text = spec.down
-                textSize = 10f
-                setTextColor(Color.parseColor("#4B5563"))
-                layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
-                    bottomMargin = dp(3)
-                }
-            })
-        }
+        key.addView(TextView(this).apply {
+            text = spec.left
+            textSize = sideSize
+            setTextColor(Color.parseColor("#4B5563"))
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.START or Gravity.CENTER_VERTICAL).apply {
+                marginStart = dp(4)
+            }
+        })
+        key.addView(TextView(this).apply {
+            text = spec.up
+            textSize = sideSize
+            setTextColor(Color.parseColor("#4B5563"))
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
+                topMargin = verticalEdgeMargin
+            }
+        })
+        key.addView(TextView(this).apply {
+            text = spec.right
+            textSize = sideSize
+            setTextColor(Color.parseColor("#4B5563"))
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.END or Gravity.CENTER_VERTICAL).apply {
+                marginEnd = dp(4)
+            }
+        })
+        key.addView(TextView(this).apply {
+            text = spec.down
+            textSize = sideSize
+            setTextColor(Color.parseColor("#4B5563"))
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+                bottomMargin = verticalEdgeMargin
+            }
+        })
 
         var startX = 0f
         var startY = 0f
@@ -1442,13 +1444,4 @@ class FlickImeService : InputMethodService() {
             .getBoolean("vibration_enabled", false)
     }
 
-    private fun isPinyinSideHintsEnabled(): Boolean {
-        return getSharedPreferences(SETTINGS_PREFS, Context.MODE_PRIVATE)
-            .getBoolean("pinyin_side_hints_enabled", true)
-    }
-
-    private fun isSymbolSideHintsEnabled(): Boolean {
-        return getSharedPreferences(SETTINGS_PREFS, Context.MODE_PRIVATE)
-            .getBoolean("symbol_side_hints_enabled", true)
-    }
 }

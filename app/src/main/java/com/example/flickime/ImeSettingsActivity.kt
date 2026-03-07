@@ -40,8 +40,6 @@ private fun ImeSettingsScreen() {
     val prefs = context.getSharedPreferences("flick_settings", android.content.Context.MODE_PRIVATE)
     var soundEnabled by remember { mutableStateOf(prefs.getBoolean("sound_enabled", true)) }
     var vibrationEnabled by remember { mutableStateOf(prefs.getBoolean("vibration_enabled", false)) }
-    var pinyinSideHintsEnabled by remember { mutableStateOf(prefs.getBoolean("pinyin_side_hints_enabled", true)) }
-    var symbolSideHintsEnabled by remember { mutableStateOf(prefs.getBoolean("symbol_side_hints_enabled", true)) }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri != null) {
             try {
@@ -92,32 +90,6 @@ private fun ImeSettingsScreen() {
                 onCheckedChange = {
                     vibrationEnabled = it
                     prefs.edit().putBoolean("vibration_enabled", it).apply()
-                }
-            )
-        }
-        androidx.compose.foundation.layout.Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text("字母(拼音)四周小字")
-            Switch(
-                checked = pinyinSideHintsEnabled,
-                onCheckedChange = {
-                    pinyinSideHintsEnabled = it
-                    prefs.edit().putBoolean("pinyin_side_hints_enabled", it).apply()
-                }
-            )
-        }
-        androidx.compose.foundation.layout.Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Text("符号四周小字")
-            Switch(
-                checked = symbolSideHintsEnabled,
-                onCheckedChange = {
-                    symbolSideHintsEnabled = it
-                    prefs.edit().putBoolean("symbol_side_hints_enabled", it).apply()
                 }
             )
         }
