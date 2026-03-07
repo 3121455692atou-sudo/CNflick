@@ -30,7 +30,9 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.flickime.data.DefaultSymbolMap
 import com.example.flickime.data.KeyMapStore
+import com.example.flickime.model.DirectionalKeySpec
 import com.example.flickime.model.FlickKeySpec
 import org.json.JSONArray
 import org.json.JSONObject
@@ -41,6 +43,8 @@ class KeyMappingActivity : ComponentActivity() {
         setContent { KeyMappingScreen() }
     }
 }
+
+private enum class MappingType { PINYIN, SYMBOL }
 
 private data class KeyEdit(
     var center: String,
@@ -54,21 +58,25 @@ private data class KeyEdit(
 @Composable
 private fun KeyMappingScreen() {
     val context = LocalContext.current
-    val initial = remember { KeyMapStore.loadPinyinKeys(context) }
+    val mappingType = remember {
+        when ((context as? KeyMappingActivity)?.intent?.getStringExtra("map_type")) {
+            "symbol" -> MappingType.SYMBOL
+            else -> MappingType.PINYIN
+        }
+    }
+    val initial = remember {
+        when (mappingType) {
+            MappingType.PINYIN -> KeyMapStore.loadPinyinKeys(context).map {
+                KeyEdit(it.center, it.left, it.up, it.right, it.down, it.zone.name)
+            }
+            MappingType.SYMBOL -> KeyMapStore.loadSymbolKeys(context).map {
+                KeyEdit(it.center, it.left, it.up, it.right, it.down, "Symbol")
+            }
+        }
+    }
     val edits = remember {
         mutableStateListOf<KeyEdit>().apply {
-            initial.forEach {
-                add(
-                    KeyEdit(
-                        center = it.center,
-                        left = it.left,
-                        up = it.up,
-                        right = it.right,
-                        down = it.down,
-                        zoneName = it.zone.name
-                    )
-                )
-            }
+            addAll(initial)
         }
     }
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
@@ -80,7 +88,11 @@ private fun KeyMappingScreen() {
             edits.clear()
             for (i in 0 until 12) {
                 val o = arr.getJSONObject(i)
-                val zone = if (i < 5) "Shengmu" else "Yunmu"
+                val zone = if (mappingType == MappingType.PINYIN) {
+                    if (i < 5) "Shengmu" else "Yunmu"
+                } else {
+                    "Symbol"
+                }
                 edits.add(
                     KeyEdit(
                         center = o.optString("center", ""),
@@ -129,7 +141,8 @@ private fun KeyMappingScreen() {
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Text("自定义拼音12键映射", fontSize = 22.sp)
+        val title = if (mappingType == MappingType.PINYIN) "自定义拼音12键映射" else "自定义符号12键映射"
+        Text(title, fontSize = 22.sp)
         Text("每个键可改 5 个方向：中/左/上/右/下。保存后回到输入法立即生效。")
 
         edits.forEachIndexed { index, item ->
@@ -151,27 +164,48 @@ private fun KeyMappingScreen() {
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             Button(onClick = {
-                val def = com.example.flickime.data.DefaultKeyMap.keys
                 edits.clear()
-                def.forEach {
-                    edits.add(KeyEdit(it.center, it.left, it.up, it.right, it.down, it.zone.name))
+                if (mappingType == MappingType.PINYIN) {
+                    val def = com.example.flickime.data.DefaultKeyMap.keys
+                    def.forEach {
+                        edits.add(KeyEdit(it.center, it.left, it.up, it.right, it.down, it.zone.name))
+                    }
+                } else {
+                    val def = DefaultSymbolMap.keys
+                    def.forEach {
+                        edits.add(KeyEdit(it.center, it.left, it.up, it.right, it.down, "Symbol"))
+                    }
                 }
             }, modifier = Modifier.weight(1f)) {
                 Text("恢复默认")
             }
             Button(onClick = {
-                val old = KeyMapStore.loadPinyinKeys(context)
-                val newKeys = edits.mapIndexed { i, e ->
-                    FlickKeySpec(
-                        center = e.center.ifBlank { old[i].center },
-                        left = e.left.ifBlank { old[i].left },
-                        up = e.up.ifBlank { old[i].up },
-                        right = e.right.ifBlank { old[i].right },
-                        down = e.down.ifBlank { old[i].down },
-                        zone = old[i].zone
-                    )
+                if (mappingType == MappingType.PINYIN) {
+                    val old = KeyMapStore.loadPinyinKeys(context)
+                    val newKeys = edits.mapIndexed { i, e ->
+                        FlickKeySpec(
+                            center = e.center.ifBlank { old[i].center },
+                            left = e.left.ifBlank { old[i].left },
+                            up = e.up.ifBlank { old[i].up },
+                            right = e.right.ifBlank { old[i].right },
+                            down = e.down.ifBlank { old[i].down },
+                            zone = old[i].zone
+                        )
+                    }
+                    KeyMapStore.savePinyinKeys(context, newKeys)
+                } else {
+                    val old = KeyMapStore.loadSymbolKeys(context)
+                    val newKeys = edits.mapIndexed { i, e ->
+                        DirectionalKeySpec(
+                            center = e.center.ifBlank { old[i].center },
+                            left = e.left.ifBlank { old[i].left },
+                            up = e.up.ifBlank { old[i].up },
+                            right = e.right.ifBlank { old[i].right },
+                            down = e.down.ifBlank { old[i].down }
+                        )
+                    }
+                    KeyMapStore.saveSymbolKeys(context, newKeys)
                 }
-                KeyMapStore.savePinyinKeys(context, newKeys)
                 Toast.makeText(context, "已保存映射", Toast.LENGTH_SHORT).show()
             }, modifier = Modifier.weight(1f)) {
                 Text("保存映射")
@@ -183,7 +217,14 @@ private fun KeyMappingScreen() {
                 modifier = Modifier.weight(1f)
             ) { Text("导入 JSON") }
             Button(
-                onClick = { exportLauncher.launch("cnflick_keymap.json") },
+                onClick = {
+                    val fileName = if (mappingType == MappingType.PINYIN) {
+                        "cnflick_pinyin_keymap.json"
+                    } else {
+                        "cnflick_symbol_keymap.json"
+                    }
+                    exportLauncher.launch(fileName)
+                },
                 modifier = Modifier.weight(1f)
             ) { Text("导出 JSON") }
         }

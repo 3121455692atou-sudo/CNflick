@@ -83,6 +83,7 @@ class FlickImeService : InputMethodService() {
     private var alphaCapsLock = false
     private val clipboardHistory = mutableListOf<String>()
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener { captureSystemClipboard() }
+    private val modeSwitchViews = mutableListOf<Pair<TextView, Mode>>()
 
     private enum class Mode { FLICK, ALPHA, NUM, SYMBOL, CANDIDATE, FUNC, CLIPBOARD }
     private var mode: Mode = Mode.FLICK
@@ -111,6 +112,7 @@ class FlickImeService : InputMethodService() {
 
     override fun onCreateInputView(): View {
         initDimensions()
+        modeSwitchViews.clear()
 
         val root = FrameLayout(this).apply {
             layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
@@ -177,6 +179,7 @@ class FlickImeService : InputMethodService() {
         root.addView(rootOverlay)
 
         refreshCandidateViews()
+        refreshModeSwitchStyles()
         return root
     }
 
@@ -261,24 +264,24 @@ class FlickImeService : InputMethodService() {
         val keys = KeyMapStore.loadPinyinKeys(this)
         val rows = listOf(
             listOf(
-                controlKey("☆123") { switchMode(Mode.NUM) },
+                modeSwitchKey("☆123", Mode.NUM),
                 pinyinFlickKey(keys[0]), pinyinFlickKey(keys[1]), pinyinFlickKey(keys[2]),
                 backspaceKey()
             ),
             listOf(
-                controlKey("ABC") { switchMode(Mode.ALPHA) },
+                modeSwitchKey("ABC", Mode.ALPHA),
                 pinyinFlickKey(keys[3]), pinyinFlickKey(keys[4]), pinyinFlickKey(keys[5]),
                 controlKey("空格") { onSpacePressed() }
             ),
             listOf(
-                controlKey("拼音") { switchMode(Mode.FLICK) },
+                modeSwitchKey("拼音", Mode.FLICK),
                 pinyinFlickKey(keys[6]), pinyinFlickKey(keys[7]), pinyinFlickKey(keys[8]),
                 primaryKey("回车") { sendEnter() }
             ),
             listOf(
-                controlKey("符号") { switchMode(Mode.SYMBOL) },
+                modeSwitchKey("符号", Mode.SYMBOL),
                 pinyinFlickKey(keys[9]), pinyinFlickKey(keys[10]), pinyinFlickKey(keys[11]),
-                controlKey("功能") { switchMode(Mode.FUNC) }
+                modeSwitchKey("功能", Mode.FUNC)
             )
         )
 
@@ -299,55 +302,44 @@ class FlickImeService : InputMethodService() {
         val yzq = DirectionalSpec("z", "y", "z", "'", "z")
 
         val rows = listOf(
-            listOf(controlKey("☆123") { switchMode(Mode.NUM) }, groupedFlickKey("ABC", abc), groupedFlickKey("DEF", def), groupedFlickKey("GHI", ghi), backspaceKey()),
-            listOf(controlKey("ABC") { switchMode(Mode.ALPHA) }, groupedFlickKey("JKL", jkl), groupedFlickKey("MNO", mno), groupedFlickKey("PQR", pqr), controlKey("空格") { onSpacePressed() }),
-            listOf(controlKey("拼音") { switchMode(Mode.FLICK) }, groupedFlickKey("STU", stu), groupedFlickKey("VWX", vwx), groupedFlickKey("YZ'", yzq), primaryKey("回车") { sendEnter() }),
-            listOf(controlKey("符号") { switchMode(Mode.SYMBOL) }, inputKey(","), controlKey(if (alphaCapsLock) "大写锁定开" else "大写锁定关") { toggleAlphaCaps() }, inputKey("."), controlKey("功能") { switchMode(Mode.FUNC) })
+            listOf(modeSwitchKey("☆123", Mode.NUM), groupedFlickKey("ABC", abc), groupedFlickKey("DEF", def), groupedFlickKey("GHI", ghi), backspaceKey()),
+            listOf(modeSwitchKey("ABC", Mode.ALPHA), groupedFlickKey("JKL", jkl), groupedFlickKey("MNO", mno), groupedFlickKey("PQR", pqr), controlKey("空格") { onSpacePressed() }),
+            listOf(modeSwitchKey("拼音", Mode.FLICK), groupedFlickKey("STU", stu), groupedFlickKey("VWX", vwx), groupedFlickKey("YZ'", yzq), primaryKey("回车") { sendEnter() }),
+            listOf(modeSwitchKey("符号", Mode.SYMBOL), inputKey(","), controlKey(if (alphaCapsLock) "大写锁定开" else "大写锁定关") { toggleAlphaCaps() }, inputKey("."), modeSwitchKey("功能", Mode.FUNC))
         )
         return panelFromRows(rows)
     }
 
     private fun buildNumPanel(): View {
         val rows = listOf(
-            listOf(controlKey("☆123") { switchMode(Mode.NUM) }, inputKey("1"), inputKey("2"), inputKey("3"), backspaceKey()),
-            listOf(controlKey("ABC") { switchMode(Mode.ALPHA) }, inputKey("4"), inputKey("5"), inputKey("6"), controlKey("空格") { onSpacePressed() }),
-            listOf(controlKey("拼音") { switchMode(Mode.FLICK) }, inputKey("7"), inputKey("8"), inputKey("9"), primaryKey("回车") { sendEnter() }),
-            listOf(controlKey("符号") { switchMode(Mode.SYMBOL) }, inputKey("("), inputKey("0"), inputKey(")"), controlKey("功能") { switchMode(Mode.FUNC) })
+            listOf(modeSwitchKey("☆123", Mode.NUM), inputKey("1"), inputKey("2"), inputKey("3"), backspaceKey()),
+            listOf(modeSwitchKey("ABC", Mode.ALPHA), inputKey("4"), inputKey("5"), inputKey("6"), controlKey("空格") { onSpacePressed() }),
+            listOf(modeSwitchKey("拼音", Mode.FLICK), inputKey("7"), inputKey("8"), inputKey("9"), primaryKey("回车") { sendEnter() }),
+            listOf(modeSwitchKey("符号", Mode.SYMBOL), inputKey("("), inputKey("0"), inputKey(")"), modeSwitchKey("功能", Mode.FUNC))
         )
         return panelFromRows(rows)
     }
 
     private fun buildSymbolPanel(): View {
-        val specs = listOf(
-            DirectionalSpec("，", "。", "？", "！", "…"),
-            DirectionalSpec("@", "#", "$", "%", "&"),
-            DirectionalSpec("*", "+", "=", "/", "\\"),
-            DirectionalSpec("(", ")", "[", "]", "{"),
-            DirectionalSpec("}", "<", ">", "《", "》"),
-            DirectionalSpec("'", "\"", "`", "~", "^"),
-            DirectionalSpec("|", "_", "-", "—", "·"),
-            DirectionalSpec("；", "：", "、", "“", "”"),
-            DirectionalSpec("‘", "’", "￥", "€", "£"),
-            DirectionalSpec("§", "※", "☆", "★", "→"),
-            DirectionalSpec("←", "↑", "↓", "↔", "✓"),
-            DirectionalSpec("×", "÷", "°", "㎡", "™")
-        )
+        val specs = KeyMapStore.loadSymbolKeys(this).map {
+            DirectionalSpec(it.center, it.left, it.up, it.right, it.down)
+        }
 
         val rows = listOf(
-            listOf(controlKey("☆123") { switchMode(Mode.NUM) }, textFlickKey(specs[0]), textFlickKey(specs[1]), textFlickKey(specs[2]), backspaceKey()),
-            listOf(controlKey("ABC") { switchMode(Mode.ALPHA) }, textFlickKey(specs[3]), textFlickKey(specs[4]), textFlickKey(specs[5]), controlKey("空格") { onSpacePressed() }),
-            listOf(controlKey("拼音") { switchMode(Mode.FLICK) }, textFlickKey(specs[6]), textFlickKey(specs[7]), textFlickKey(specs[8]), primaryKey("回车") { sendEnter() }),
-            listOf(controlKey("符号") { switchMode(Mode.SYMBOL) }, textFlickKey(specs[9]), textFlickKey(specs[10]), textFlickKey(specs[11]), controlKey("功能") { switchMode(Mode.FUNC) })
+            listOf(modeSwitchKey("☆123", Mode.NUM), symbolFlickKey(specs[0]), symbolFlickKey(specs[1]), symbolFlickKey(specs[2]), backspaceKey()),
+            listOf(modeSwitchKey("ABC", Mode.ALPHA), symbolFlickKey(specs[3]), symbolFlickKey(specs[4]), symbolFlickKey(specs[5]), controlKey("空格") { onSpacePressed() }),
+            listOf(modeSwitchKey("拼音", Mode.FLICK), symbolFlickKey(specs[6]), symbolFlickKey(specs[7]), symbolFlickKey(specs[8]), primaryKey("回车") { sendEnter() }),
+            listOf(modeSwitchKey("符号", Mode.SYMBOL), symbolFlickKey(specs[9]), symbolFlickKey(specs[10]), symbolFlickKey(specs[11]), modeSwitchKey("功能", Mode.FUNC))
         )
         return panelFromRows(rows)
     }
 
     private fun buildFunctionPanel(): View {
         val rows = listOf(
-            listOf(controlKey("☆123") { switchMode(Mode.NUM) }, controlKey("复制") { copySelection() }, controlKey("↑") { sendArrow(KeyEvent.KEYCODE_DPAD_UP) }, controlKey("粘贴") { pasteClipboard() }, backspaceKey()),
-            listOf(controlKey("ABC") { switchMode(Mode.ALPHA) }, controlKey("←") { sendArrow(KeyEvent.KEYCODE_DPAD_LEFT) }, controlKey("●") {}, controlKey("→") { sendArrow(KeyEvent.KEYCODE_DPAD_RIGHT) }, controlKey("空格") { onSpacePressed() }),
-            listOf(controlKey("拼音") { switchMode(Mode.FLICK) }, controlKey("剪切") { cutSelection() }, controlKey("↓") { sendArrow(KeyEvent.KEYCODE_DPAD_DOWN) }, controlKey("全选") { selectAll() }, primaryKey("回车") { sendEnter() }),
-            listOf(controlKey("功能") { switchMode(Mode.FUNC) }, controlKey("符号") { switchMode(Mode.SYMBOL) }, controlKey("剪贴板") { showClipboardPanel() }, controlKey("HOME") { sendKey(KeyEvent.KEYCODE_MOVE_HOME) }, controlKey("END") { sendKey(KeyEvent.KEYCODE_MOVE_END) })
+            listOf(modeSwitchKey("☆123", Mode.NUM), controlKey("复制") { copySelection() }, controlKey("↑") { sendArrow(KeyEvent.KEYCODE_DPAD_UP) }, controlKey("粘贴") { pasteClipboard() }, backspaceKey()),
+            listOf(modeSwitchKey("ABC", Mode.ALPHA), controlKey("←") { sendArrow(KeyEvent.KEYCODE_DPAD_LEFT) }, controlKey("●") {}, controlKey("→") { sendArrow(KeyEvent.KEYCODE_DPAD_RIGHT) }, controlKey("空格") { onSpacePressed() }),
+            listOf(modeSwitchKey("拼音", Mode.FLICK), controlKey("剪切") { cutSelection() }, controlKey("↓") { sendArrow(KeyEvent.KEYCODE_DPAD_DOWN) }, controlKey("全选") { selectAll() }, primaryKey("回车") { sendEnter() }),
+            listOf(modeSwitchKey("符号", Mode.SYMBOL), controlKey("HOME") { sendKey(KeyEvent.KEYCODE_MOVE_HOME) }, controlKey("剪贴板") { showClipboardPanel() }, controlKey("END") { sendKey(KeyEvent.KEYCODE_MOVE_END) }, modeSwitchKey("功能", Mode.FUNC))
         )
         return panelFromRows(rows)
     }
@@ -620,6 +612,92 @@ class FlickImeService : InputMethodService() {
         return key
     }
 
+    private fun symbolFlickKey(spec: DirectionalSpec): View {
+        val key = FrameLayout(this).apply {
+            background = keyBackground(Color.parseColor("#EEF1F5"), Color.parseColor("#A6AFBC"))
+            isClickable = true
+        }
+        key.addView(TextView(this).apply {
+            text = spec.center
+            textSize = 18f
+            setTypeface(typeface, Typeface.BOLD)
+            setTextColor(Color.parseColor("#111827"))
+            gravity = Gravity.CENTER
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
+        })
+        key.addView(TextView(this).apply {
+            text = spec.left
+            textSize = 10f
+            setTextColor(Color.parseColor("#4B5563"))
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.START or Gravity.CENTER_VERTICAL).apply {
+                marginStart = dp(4)
+            }
+        })
+        key.addView(TextView(this).apply {
+            text = spec.up
+            textSize = 10f
+            setTextColor(Color.parseColor("#4B5563"))
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
+                topMargin = dp(3)
+            }
+        })
+        key.addView(TextView(this).apply {
+            text = spec.right
+            textSize = 10f
+            setTextColor(Color.parseColor("#4B5563"))
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.END or Gravity.CENTER_VERTICAL).apply {
+                marginEnd = dp(4)
+            }
+        })
+        key.addView(TextView(this).apply {
+            text = spec.down
+            textSize = 10f
+            setTextColor(Color.parseColor("#4B5563"))
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+                bottomMargin = dp(3)
+            }
+        })
+
+        var startX = 0f
+        var startY = 0f
+        var direction = FlickDirection.Center
+        key.setOnTouchListener { v, e ->
+            when (e.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    startX = e.x
+                    startY = e.y
+                    direction = FlickDirection.Center
+                    showHintOverlay(spec, v, direction, true)
+                    true
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    direction = detectDirection(e.x - startX, e.y - startY, true)
+                    showHintOverlay(spec, v, direction, true)
+                    true
+                }
+                MotionEvent.ACTION_UP -> {
+                    hideHintOverlay()
+                    val out = when (direction) {
+                        FlickDirection.Center -> spec.center
+                        FlickDirection.Left -> spec.left
+                        FlickDirection.Up -> spec.up
+                        FlickDirection.Right -> spec.right
+                        FlickDirection.Down -> spec.down
+                    }
+                    playKeyClick()
+                    commitTextSafe(out)
+                    true
+                }
+                MotionEvent.ACTION_CANCEL -> {
+                    hideHintOverlay()
+                    true
+                }
+                else -> false
+            }
+        }
+        return key
+    }
+
     private fun textFlickKey(spec: DirectionalSpec): View = directionalKey(spec) { commitTextSafe(it) }
 
     private fun groupedFlickKey(label: String, spec: DirectionalSpec): View {
@@ -693,6 +771,41 @@ class FlickImeService : InputMethodService() {
             setTextColor(Color.parseColor("#1F2937"))
             background = keyBackground(Color.parseColor("#C7D0DC"), Color.parseColor("#9AA4B2"))
             setOnClickListener { playKeyClick(); onClick() }
+        }
+    }
+
+    private fun modeSwitchKey(label: String, target: Mode): View {
+        val key = TextView(this).apply {
+            text = displayLabel(label)
+            gravity = Gravity.CENTER
+            textSize = 14f
+            setTypeface(typeface, Typeface.NORMAL)
+            setOnClickListener { playKeyClick(); switchMode(target) }
+        }
+        modeSwitchViews += key to target
+        applyModeSwitchStyle(key, selected = mode == target)
+        return key
+    }
+
+    private fun applyModeSwitchStyle(v: TextView, selected: Boolean) {
+        if (selected) {
+            v.setTextColor(Color.WHITE)
+            v.background = keyBackground(Color.parseColor("#F59E0B"), Color.parseColor("#D97706"))
+        } else {
+            v.setTextColor(Color.parseColor("#1F2937"))
+            v.background = keyBackground(Color.parseColor("#C7D0DC"), Color.parseColor("#9AA4B2"))
+        }
+    }
+
+    private fun refreshModeSwitchStyles() {
+        val iterator = modeSwitchViews.iterator()
+        while (iterator.hasNext()) {
+            val (view, target) = iterator.next()
+            if (view.parent == null) {
+                iterator.remove()
+            } else {
+                applyModeSwitchStyle(view, mode == target)
+            }
         }
     }
 
@@ -933,6 +1046,7 @@ class FlickImeService : InputMethodService() {
         candidatePanel.visibility = if (mode == Mode.CANDIDATE) View.VISIBLE else View.GONE
         funcPanel.visibility = if (mode == Mode.FUNC) View.VISIBLE else View.GONE
         clipboardPanel.visibility = if (mode == Mode.CLIPBOARD) View.VISIBLE else View.GONE
+        refreshModeSwitchStyles()
     }
 
     private fun refreshCandidateViews() {

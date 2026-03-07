@@ -118,11 +118,23 @@ private fun ImeSettingsScreen() {
             onClick = {
                 context.startActivity(
                     android.content.Intent(context, KeyMappingActivity::class.java)
+                        .putExtra("map_type", "pinyin")
                         .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
                 )
             },
             modifier = Modifier.fillMaxWidth()
-        ) { Text("自定义按键映射") }
+        ) { Text("自定义拼音映射") }
+
+        OutlinedButton(
+            onClick = {
+                context.startActivity(
+                    android.content.Intent(context, KeyMappingActivity::class.java)
+                        .putExtra("map_type", "symbol")
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                )
+            },
+            modifier = Modifier.fillMaxWidth()
+        ) { Text("自定义符号映射") }
 
         OutlinedButton(
             onClick = {
