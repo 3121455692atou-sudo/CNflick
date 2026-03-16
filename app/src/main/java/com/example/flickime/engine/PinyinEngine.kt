@@ -3,10 +3,12 @@ package com.example.flickime.engine
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import java.io.File
+import java.util.LinkedHashMap
 import java.text.Normalizer
 
 class PinyinEngine(private val context: Context) {
     private val dbName = "pinyin_dict_v2.db"
+    private val dbAssetVersion = 4
 
     private val db: SQLiteDatabase? by lazy {
         try {
@@ -29,11 +31,31 @@ class PinyinEngine(private val context: Context) {
         }
     }
 
+    private val singleCache = object : LinkedHashMap<String, List<String>>(320, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<String>>?): Boolean = size > 320
+    }
+    private val phraseCache = object : LinkedHashMap<String, List<String>>(240, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<String>>?): Boolean = size > 240
+    }
+
     fun queryCandidates(pinyin: String, limit: Int = 10): List<String> {
         val query = normalizePinyin(pinyin)
         if (query.isBlank()) return emptyList()
+        val versionTag = "lv${LexiconManager.getVersion(context)}-sv${ShortcutManager.getVersion(context)}"
+        val cacheKey = "$versionTag|$query#$limit"
+        synchronized(singleCache) {
+            singleCache[cacheKey]?.let { return it }
+        }
 
-        val database = db ?: return fallbackCandidates(query, limit)
+        val shortcuts = ShortcutManager.query(context, query, limit * 4)
+        val lexicon = LexiconManager.queryCandidates(context, query, limit * 4)
+        val database = db
+        if (database == null) {
+            val out = (shortcuts + lexicon + fallbackCandidates(query, limit * 2)).distinct().take(limit)
+            synchronized(singleCache) { singleCache[cacheKey] = out }
+            return out
+        }
+
         val sql = """
             SELECT hanzi
             FROM dict
@@ -59,17 +81,60 @@ class PinyinEngine(private val context: Context) {
         ).use { c ->
             while (c.moveToNext()) learned += c.getString(0)
         }
-        if (base.isEmpty() && learned.isEmpty()) return fallbackCandidates(query, limit)
+        if (base.isEmpty() && learned.isEmpty() && lexicon.isEmpty() && shortcuts.isEmpty()) {
+            val out = fallbackCandidates(query, limit)
+            synchronized(singleCache) { singleCache[cacheKey] = out }
+            return out
+        }
 
-        // learned > fallback-common > base-dict
+        // learned > custom-shortcuts > enabled-lexicons > fallback-common > base-dict
         val common = fallbackCandidates(query, limit * 2)
-        return (learned + common + base).distinct().take(limit)
+        val out = (learned + shortcuts + lexicon + common + base).distinct().take(limit)
+        synchronized(singleCache) { singleCache[cacheKey] = out }
+        return out
     }
 
     fun queryCandidatesForSyllables(syllables: List<String>, limit: Int = 10): List<String> {
         val clean = syllables.map { normalizePinyin(it) }.filter { it.isNotBlank() }
         if (clean.isEmpty()) return emptyList()
         if (clean.size == 1) return queryCandidates(clean.first(), limit)
+        val versionTag = "lv${LexiconManager.getVersion(context)}-sv${ShortcutManager.getVersion(context)}"
+        val cacheKey = versionTag + "|" + clean.joinToString("'") + "#$limit"
+        synchronized(phraseCache) {
+            phraseCache[cacheKey]?.let { return it }
+        }
+
+        val joined = clean.joinToString("")
+        val database = db
+        val phraseFromLexicon = LexiconManager.queryCandidates(context, joined, limit * 6)
+
+        val phraseFromDict = mutableListOf<String>()
+        database?.rawQuery(
+            """
+            SELECT hanzi
+            FROM dict
+            WHERE pinyin = ?
+            ORDER BY freq DESC
+            LIMIT 120
+            """.trimIndent(),
+            arrayOf(joined)
+        )?.use { c ->
+            while (c.moveToNext()) phraseFromDict += c.getString(0)
+        }
+
+        val learned = mutableListOf<String>()
+        database?.rawQuery(
+            """
+            SELECT hanzi
+            FROM user_choice
+            WHERE pinyin = ?
+            ORDER BY boost DESC, updated_at DESC
+            LIMIT 60
+            """.trimIndent(),
+            arrayOf(joined)
+        )?.use { c ->
+            while (c.moveToNext()) learned += c.getString(0)
+        }
 
         // Beam search: combine top choices per syllable into multi-char phrases.
         var phrases = listOf("")
@@ -82,21 +147,10 @@ class PinyinEngine(private val context: Context) {
             phrases = next.take(limit * 4)
         }
 
-        val joined = clean.joinToString("")
-        val learned = mutableListOf<String>()
-        db?.rawQuery(
-            """
-            SELECT hanzi
-            FROM user_choice
-            WHERE pinyin = ?
-            ORDER BY boost DESC, updated_at DESC
-            LIMIT 60
-            """.trimIndent(),
-            arrayOf(joined)
-        )?.use { c ->
-            while (c.moveToNext()) learned += c.getString(0)
-        }
-        return (learned + phrases).distinct().take(limit)
+        val commonWhole = fallbackCandidates(joined, limit * 3)
+        val out = (learned + phraseFromLexicon + phraseFromDict + commonWhole + phrases).distinct().take(limit)
+        synchronized(phraseCache) { phraseCache[cacheKey] = out }
+        return out
     }
 
     fun recordUserChoice(pinyin: String, hanzi: String) {
@@ -113,14 +167,20 @@ class PinyinEngine(private val context: Context) {
             """.trimIndent(),
             arrayOf(query, hanzi, now)
         )
+        synchronized(singleCache) { singleCache.clear() }
+        synchronized(phraseCache) { phraseCache.clear() }
     }
 
     private fun ensureDbCopied(): File {
         val outFile = File(context.filesDir, dbName)
-        if (outFile.exists() && outFile.length() > 0L) return outFile
+        val prefs = context.getSharedPreferences("flick_ime", Context.MODE_PRIVATE)
+        val copiedVersion = prefs.getInt("dict_asset_version", 0)
+        val needsRefresh = copiedVersion < dbAssetVersion || !outFile.exists() || outFile.length() <= 0L
+        if (!needsRefresh) return outFile
         context.assets.open(dbName).use { input ->
             outFile.outputStream().use { output -> input.copyTo(output) }
         }
+        prefs.edit().putInt("dict_asset_version", dbAssetVersion).apply()
         return outFile
     }
 
@@ -139,7 +199,25 @@ class PinyinEngine(private val context: Context) {
             "ta" to listOf("他", "她", "它", "塔"),
             "ma" to listOf("吗", "妈", "马", "嘛"),
             "le" to listOf("了", "乐", "勒"),
-            "ai" to listOf("爱", "矮", "哎")
+            "ai" to listOf("爱", "矮", "哎"),
+            "zhendong" to listOf("震动", "振动", "真懂"),
+            "nihao" to listOf("你好", "拟好"),
+            "gaoxing" to listOf("高兴"),
+            "shouji" to listOf("手机", "收集"),
+            "xiexie" to listOf("谢谢"),
+            "duibuqi" to listOf("对不起"),
+            "meiguanxi" to listOf("没关系"),
+            "haode" to listOf("好的"),
+            "ok" to listOf("OK"),
+            "cao" to listOf("草", "槽"),
+            "wocao" to listOf("卧槽"),
+            "niubi" to listOf("牛逼", "牛啤"),
+            "zhenbang" to listOf("真棒"),
+            "haochi" to listOf("好吃"),
+            "haokan" to listOf("好看"),
+            "xiaohongshu" to listOf("小红书"),
+            "douyin" to listOf("抖音"),
+            "weixin" to listOf("微信")
         )
         return (common[pinyin] ?: emptyList()).take(limit)
     }

@@ -1,0 +1,34 @@
+{
+  "id": "com.cnflick.theme.hatsune_miku_teal",
+  "name": "Hatsune Miku Teal",
+  "version": "1.0.0",
+  "author": "CNflick Community",
+  "license": "CC-BY-NC 4.0",
+  "minAppVersion": "1.0.0",
+  "colors": {
+    "keyboardBackground": "#D7F4F1",
+    "panelBackground": "#BEEDE8",
+    "keyBackground": "#ECFBF9",
+    "keyBorder": "#5BBEB5",
+    "keyText": "#103A38",
+    "subKeyText": "#2A6C67",
+    "accentKeyBackground": "#39C5BB",
+    "accentKeyText": "#FFFFFF",
+    "selectedItemBackground": "#2FA59D",
+    "selectedItemText": "#FFFFFF",
+    "hintText": "#2A6C67"
+  },
+  "shape": {
+    "keyCornerRadiusDp": 12,
+    "panelCornerRadiusDp": 14,
+    "strokeWidthDp": 1
+  },
+  "typography": {
+    "mainKeySp": 18,
+    "subKeySp": 12,
+    "candidateSp": 20
+  },
+  "assets": {
+    "backgroundImage": "assets/miku-background.jpg"
+  }
+}

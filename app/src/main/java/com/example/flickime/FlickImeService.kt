@@ -6,10 +6,17 @@ import android.content.Context
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.BitmapFactory
+import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.LayerDrawable
 import android.inputmethodservice.InputMethodService
+import android.media.AudioAttributes
 import android.media.AudioManager
+import android.media.SoundPool
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
@@ -20,21 +27,31 @@ import android.view.Gravity
 import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
+import android.view.HapticFeedbackConstants
 import android.view.ViewGroup
 import android.view.inputmethod.InputConnection
 import android.widget.FrameLayout
 import android.widget.GridLayout
 import android.widget.HorizontalScrollView
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
 import com.example.flickime.data.DefaultKeyMap
 import com.example.flickime.data.KeyMapStore
+import com.example.flickime.engine.LexiconManager
 import com.example.flickime.engine.PinyinEngine
 import com.example.flickime.model.FlickDirection
 import com.example.flickime.model.FlickKeySpec
 import com.example.flickime.model.KeyZone
+import com.example.flickime.theme.FontManager
+import com.example.flickime.theme.KeyboardTheme
+import com.example.flickime.theme.ThemeManager
+import com.example.flickime.theme.UiPrefs
+import java.io.File
 import java.util.Locale
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.abs
 
 class FlickImeService : InputMethodService() {
@@ -48,16 +65,43 @@ class FlickImeService : InputMethodService() {
         val right: String,
         val down: String
     )
+    private data class CandidateEntry(
+        val text: String,
+        val consumeSyllables: Int
+    )
+    private data class ModeSwitchEntry(
+        val container: FrameLayout,
+        val label: TextView,
+        val target: Mode
+    )
 
     private lateinit var pinyinEngine: PinyinEngine
+    private val candidateExecutor = Executors.newSingleThreadExecutor()
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private val candidateToken = AtomicInteger(0)
+    private lateinit var keyboardTheme: KeyboardTheme
+    private var keyboardBgImage: android.graphics.Bitmap? = null
+    private var keyBgImage: android.graphics.Bitmap? = null
+    private var activeTypeface: Typeface = Typeface.DEFAULT
+    private var centerTextSp: Float = 18f
+    private var sideTextSp: Float = 10f
+    private var keyTextAlpha: Float = 1f
+    private var keyImageAlpha: Float = 0.9f
+    private var keyBgAlpha: Float = 0.85f
+    private var keySizeScale: Float = 1f
+    private var keyGapDp: Float = 4f
     private lateinit var clipboardManager: ClipboardManager
     private lateinit var audioManager: AudioManager
     private var vibrator: Vibrator? = null
+    private var soundPool: SoundPool? = null
+    private var customSoundId: Int = 0
 
     private var shengmuPart: String? = null
     private val composedSyllables = mutableListOf<String>()
     private var composingText: String = ""
-    private var allCandidates: List<String> = emptyList()
+    private var allCandidates: List<CandidateEntry> = emptyList()
+    private var composingSessionFullQuery: String = ""
+    private var composingSessionCommittedText: String = ""
 
     private lateinit var composingView: TextView
     private lateinit var candidateRow: LinearLayout
@@ -74,6 +118,8 @@ class FlickImeService : InputMethodService() {
     private lateinit var clipboardList: LinearLayout
 
     private lateinit var rootOverlay: FrameLayout
+    private var inputRootView: FrameLayout? = null
+    private var rootBgView: ImageView? = null
     private lateinit var hintCenter: TextView
     private lateinit var hintLeft: TextView
     private lateinit var hintUp: TextView
@@ -87,7 +133,7 @@ class FlickImeService : InputMethodService() {
     private var alphaCapsLock = false
     private val clipboardHistory = mutableListOf<String>()
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener { captureSystemClipboard() }
-    private val modeSwitchViews = mutableListOf<Pair<TextView, Mode>>()
+    private val modeSwitchViews = mutableListOf<ModeSwitchEntry>()
 
     private enum class Mode { FLICK, ALPHA, NUM, SYMBOL, CANDIDATE, FUNC, CLIPBOARD }
     private var mode: Mode = Mode.FLICK
@@ -95,14 +141,23 @@ class FlickImeService : InputMethodService() {
     override fun onCreate() {
         super.onCreate()
         pinyinEngine = PinyinEngine(this)
+        candidateExecutor.execute {
+            runCatching { LexiconManager.warmup(this) }
+        }
+        keyboardTheme = ThemeManager.getCurrentTheme(this)
+        reloadCustomUiSettings()
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            val vm = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
-            vm.defaultVibrator
-        } else {
-            @Suppress("DEPRECATION")
-            getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        vibrator = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vm = getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+                vm?.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            }
+        } catch (_: Throwable) {
+            null
         }
         loadClipboardHistory()
         clipboardManager.addPrimaryClipChangedListener(clipListener)
@@ -111,6 +166,9 @@ class FlickImeService : InputMethodService() {
 
     override fun onDestroy() {
         clipboardManager.removePrimaryClipChangedListener(clipListener)
+        soundPool?.release()
+        soundPool = null
+        candidateExecutor.shutdownNow()
         super.onDestroy()
     }
 
@@ -120,10 +178,22 @@ class FlickImeService : InputMethodService() {
 
         val root = FrameLayout(this).apply {
             layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-            setBackgroundColor(Color.parseColor("#AEB7C5"))
+            setBackgroundColor(if (keyboardBgImage == null) colorKeyboardBackground() else Color.TRANSPARENT)
             clipChildren = false
             clipToPadding = false
         }
+        if (keyboardBgImage != null) {
+            rootBgView = ImageView(this).apply {
+                layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                scaleType = ImageView.ScaleType.CENTER_CROP
+                setImageBitmap(keyboardBgImage)
+            }
+            root.addView(rootBgView)
+        } else {
+            rootBgView = null
+        }
+
+        inputRootView = root
 
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -189,7 +259,28 @@ class FlickImeService : InputMethodService() {
 
     override fun onStartInputView(info: EditorInfo?, restarting: Boolean) {
         super.onStartInputView(info, restarting)
+        keyboardTheme = ThemeManager.getCurrentTheme(this)
+        reloadCustomUiSettings()
+        updateRootBackground()
         rebuildPanelsFromSettings()
+    }
+
+    private fun updateRootBackground() {
+        val inputRoot = inputRootView ?: return
+        if (keyboardBgImage == null) {
+            rootBgView?.let { inputRoot.removeView(it) }
+            rootBgView = null
+            inputRoot.setBackgroundColor(colorKeyboardBackground())
+            return
+        }
+        inputRoot.setBackgroundColor(Color.TRANSPARENT)
+        val bg = rootBgView ?: ImageView(this).apply {
+            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            scaleType = ImageView.ScaleType.CENTER_CROP
+            inputRoot.addView(this, 0)
+        }
+        bg.setImageBitmap(keyboardBgImage)
+        rootBgView = bg
     }
 
     private fun initDimensions() {
@@ -199,7 +290,7 @@ class FlickImeService : InputMethodService() {
         val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
         val outerPadding = dp(8)
-        rowGap = dp(4)
+        rowGap = dpf(keyGapDp.coerceIn(0f, 14f))
         candidateStripHeight = if (isLandscape) dp(40) else dp(50)
 
         val usable = screenWidth - outerPadding
@@ -211,7 +302,7 @@ class FlickImeService : InputMethodService() {
         val maxKeyboardHeight = (screenHeight * maxKeyboardRatio).toInt()
         val heightBasedRow = ((maxKeyboardHeight - rowGap * 4 - dp(6)) / 5f).toInt()
         val minRow = if (isLandscape) dp(32) else dp(46)
-        rowHeight = minOf(widthBasedRow, heightBasedRow).coerceAtLeast(minRow)
+        rowHeight = (minOf(widthBasedRow, heightBasedRow) * keySizeScale).toInt().coerceAtLeast(minRow)
     }
 
     private fun keyboardHeight(): Int = rowHeight * 5 + rowGap * 4 + dp(6)
@@ -219,15 +310,15 @@ class FlickImeService : InputMethodService() {
     private fun buildCandidateStrip(): View {
         val strip = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#D5DCE6"))
+            setBackgroundColor(resolvedPanelBackground())
             setPadding(dp(8), dp(4), dp(8), dp(4))
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, candidateStripHeight)
         }
 
         composingView = TextView(this).apply {
             textSize = 12f
-            setTypeface(typeface, Typeface.NORMAL)
-            setTextColor(Color.parseColor("#6B7280"))
+            setTypeface(activeTypeface, Typeface.NORMAL)
+            setTextColor(colorHintText())
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
             text = "拼音"
@@ -254,7 +345,8 @@ class FlickImeService : InputMethodService() {
         val expand = TextView(this).apply {
             text = "˅"
             textSize = 20f
-            setTextColor(Color.parseColor("#4B5563"))
+            setTypeface(activeTypeface, Typeface.NORMAL)
+            setTextColor(colorSubKeyText())
             setPadding(dp(10), 0, dp(10), 0)
             setOnClickListener {
                 if (allCandidates.isNotEmpty()) {
@@ -276,7 +368,7 @@ class FlickImeService : InputMethodService() {
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setBackgroundColor(Color.parseColor("#BBC4D2"))
+            setBackgroundColor(resolvedPanelBackground())
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         }
 
@@ -366,7 +458,7 @@ class FlickImeService : InputMethodService() {
     private fun buildClipboardPanel(): View {
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#BBC4D2"))
+            setBackgroundColor(resolvedPanelBackground())
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             setPadding(dp(8), dp(8), dp(8), dp(8))
         }
@@ -379,8 +471,8 @@ class FlickImeService : InputMethodService() {
         val title = TextView(this).apply {
             text = "剪贴板历史"
             textSize = 17f
-            setTypeface(typeface, Typeface.BOLD)
-            setTextColor(Color.parseColor("#111827"))
+            setTypeface(activeTypeface, Typeface.BOLD)
+            setTextColor(colorKeyText())
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
         val clear = controlKey("清空") {
@@ -416,7 +508,7 @@ class FlickImeService : InputMethodService() {
     private fun buildCandidatePanel(): View {
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(Color.parseColor("#B9C2CD"))
+            setBackgroundColor(resolvedPanelBackground())
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             setPadding(dp(8), dp(8), dp(8), dp(8))
         }
@@ -430,8 +522,8 @@ class FlickImeService : InputMethodService() {
         val title = TextView(this).apply {
             text = "全部候选"
             textSize = 17f
-            setTypeface(typeface, Typeface.BOLD)
-            setTextColor(Color.parseColor("#111827"))
+            setTypeface(activeTypeface, Typeface.BOLD)
+            setTextColor(colorKeyText())
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
 
@@ -465,7 +557,7 @@ class FlickImeService : InputMethodService() {
         val panel = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
-            setBackgroundColor(Color.parseColor("#BBC4D2"))
+            setBackgroundColor(resolvedPanelBackground())
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         }
         rows.forEachIndexed { index, rowViews -> panel.addView(makeFixedRow(rowViews, index != rows.lastIndex)) }
@@ -510,23 +602,22 @@ class FlickImeService : InputMethodService() {
     private fun buildBottomUtilityBar(): View {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, rowHeight).apply {
-                leftMargin = dp(4)
-                rightMargin = dp(4)
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, rowHeight).apply {
+                leftMargin = dp(2)
+                rightMargin = dp(2)
                 topMargin = rowGap
-                gravity = Gravity.CENTER_HORIZONTAL
             }
             gravity = Gravity.CENTER_HORIZONTAL
         }
 
         val globe = iconAction("🌐") { switchInputMethodQuick() }
+        val collapse = iconAction("⌄") { hideImeWindow() }
         val settings = iconAction("⚙") { openImeSettings() }
         val spacer1 = spacerCell()
         val spacer2 = spacerCell()
-        val spacer3 = spacerCell()
-        val cells = listOf(globe, spacer1, spacer2, spacer3, settings)
+        val cells = listOf(globe, spacer1, collapse, spacer2, settings)
         cells.forEachIndexed { index, cell ->
-            row.addView(cell, LinearLayout.LayoutParams(colWidth, rowHeight).apply {
+            row.addView(cell, LinearLayout.LayoutParams(0, rowHeight, 1f).apply {
                 if (index != cells.lastIndex) marginEnd = rowGap
             })
         }
@@ -543,9 +634,11 @@ class FlickImeService : InputMethodService() {
         return TextView(this).apply {
             text = icon
             textSize = 27f
+            setTypeface(activeTypeface, Typeface.NORMAL)
+            includeFontPadding = false
             gravity = Gravity.CENTER
             background = null
-            setTextColor(Color.parseColor("#334155"))
+            setTextColor(colorKeyText())
             setOnClickListener { playKeyClick(); onClick() }
         }
     }
@@ -553,11 +646,10 @@ class FlickImeService : InputMethodService() {
     private fun makeFixedRow(cells: List<View>, addBottomGap: Boolean): View {
         val row = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, rowHeight).apply {
-                leftMargin = dp(4)
-                rightMargin = dp(4)
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, rowHeight).apply {
+                leftMargin = dp(2)
+                rightMargin = dp(2)
                 if (addBottomGap) bottomMargin = rowGap
-                gravity = Gravity.CENTER_HORIZONTAL
             }
             gravity = Gravity.CENTER_HORIZONTAL
             clipChildren = false
@@ -565,7 +657,7 @@ class FlickImeService : InputMethodService() {
         }
 
         cells.forEachIndexed { index, cell ->
-            row.addView(cell, LinearLayout.LayoutParams(colWidth, rowHeight).apply {
+            row.addView(cell, LinearLayout.LayoutParams(0, rowHeight, 1f).apply {
                 if (index != cells.lastIndex) marginEnd = rowGap
             })
         }
@@ -574,8 +666,8 @@ class FlickImeService : InputMethodService() {
 
     private fun pinyinFlickKey(spec: FlickKeySpec): View {
         val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-        val centerSize = if (isLandscape) 15f else 18f
-        val sideSize = if (isLandscape) 9f else 10f
+        val centerSize = if (isLandscape) centerTextSp - 2f else centerTextSp
+        val sideSize = if (isLandscape) sideTextSp - 1f else sideTextSp
         val verticalEdgeMargin = if (isLandscape) dp(1) else dp(3)
         val visual = DirectionalSpec(
             spec.center.lowercase(),
@@ -585,21 +677,24 @@ class FlickImeService : InputMethodService() {
             spec.down.lowercase()
         )
         val key = FrameLayout(this).apply {
-            background = keyBackground(Color.parseColor("#EEF1F5"), Color.parseColor("#A6AFBC"))
+            background = keyBackground(colorKeyBackground(), colorKeyBorder())
             isClickable = true
         }
         key.addView(TextView(this).apply {
             text = visual.center
             textSize = centerSize
-            setTypeface(typeface, Typeface.BOLD)
-            setTextColor(Color.parseColor("#111827"))
+            includeFontPadding = false
+            setTypeface(activeTypeface, Typeface.BOLD)
+            setTextColor(colorKeyText())
             gravity = Gravity.CENTER
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
         })
         key.addView(TextView(this).apply {
             text = visual.left
             textSize = sideSize
-            setTextColor(Color.parseColor("#4B5563"))
+            includeFontPadding = false
+            setTypeface(activeTypeface, Typeface.NORMAL)
+            setTextColor(colorSubKeyText())
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.START or Gravity.CENTER_VERTICAL).apply {
                 marginStart = dp(4)
             }
@@ -607,7 +702,9 @@ class FlickImeService : InputMethodService() {
         key.addView(TextView(this).apply {
             text = visual.up
             textSize = sideSize
-            setTextColor(Color.parseColor("#4B5563"))
+            includeFontPadding = false
+            setTypeface(activeTypeface, Typeface.NORMAL)
+            setTextColor(colorSubKeyText())
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
                 topMargin = verticalEdgeMargin
             }
@@ -615,7 +712,9 @@ class FlickImeService : InputMethodService() {
         key.addView(TextView(this).apply {
             text = visual.right
             textSize = sideSize
-            setTextColor(Color.parseColor("#4B5563"))
+            includeFontPadding = false
+            setTypeface(activeTypeface, Typeface.NORMAL)
+            setTextColor(colorSubKeyText())
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.END or Gravity.CENTER_VERTICAL).apply {
                 marginEnd = dp(4)
             }
@@ -623,7 +722,9 @@ class FlickImeService : InputMethodService() {
         key.addView(TextView(this).apply {
             text = visual.down
             textSize = sideSize
-            setTextColor(Color.parseColor("#4B5563"))
+            includeFontPadding = false
+            setTypeface(activeTypeface, Typeface.NORMAL)
+            setTextColor(colorSubKeyText())
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
                 bottomMargin = verticalEdgeMargin
             }
@@ -671,25 +772,28 @@ class FlickImeService : InputMethodService() {
 
     private fun symbolFlickKey(spec: DirectionalSpec): View {
         val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-        val centerSize = if (isLandscape) 15f else 18f
-        val sideSize = if (isLandscape) 9f else 10f
+        val centerSize = if (isLandscape) centerTextSp - 2f else centerTextSp
+        val sideSize = if (isLandscape) sideTextSp - 1f else sideTextSp
         val verticalEdgeMargin = if (isLandscape) dp(1) else dp(3)
         val key = FrameLayout(this).apply {
-            background = keyBackground(Color.parseColor("#EEF1F5"), Color.parseColor("#A6AFBC"))
+            background = keyBackground(colorKeyBackground(), colorKeyBorder())
             isClickable = true
         }
         key.addView(TextView(this).apply {
             text = spec.center
             textSize = centerSize
-            setTypeface(typeface, Typeface.BOLD)
-            setTextColor(Color.parseColor("#111827"))
+            includeFontPadding = false
+            setTypeface(activeTypeface, Typeface.BOLD)
+            setTextColor(colorKeyText())
             gravity = Gravity.CENTER
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
         })
         key.addView(TextView(this).apply {
             text = spec.left
             textSize = sideSize
-            setTextColor(Color.parseColor("#4B5563"))
+            includeFontPadding = false
+            setTypeface(activeTypeface, Typeface.NORMAL)
+            setTextColor(colorSubKeyText())
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.START or Gravity.CENTER_VERTICAL).apply {
                 marginStart = dp(4)
             }
@@ -697,7 +801,9 @@ class FlickImeService : InputMethodService() {
         key.addView(TextView(this).apply {
             text = spec.up
             textSize = sideSize
-            setTextColor(Color.parseColor("#4B5563"))
+            includeFontPadding = false
+            setTypeface(activeTypeface, Typeface.NORMAL)
+            setTextColor(colorSubKeyText())
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
                 topMargin = verticalEdgeMargin
             }
@@ -705,7 +811,9 @@ class FlickImeService : InputMethodService() {
         key.addView(TextView(this).apply {
             text = spec.right
             textSize = sideSize
-            setTextColor(Color.parseColor("#4B5563"))
+            includeFontPadding = false
+            setTypeface(activeTypeface, Typeface.NORMAL)
+            setTextColor(colorSubKeyText())
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.END or Gravity.CENTER_VERTICAL).apply {
                 marginEnd = dp(4)
             }
@@ -713,7 +821,9 @@ class FlickImeService : InputMethodService() {
         key.addView(TextView(this).apply {
             text = spec.down
             textSize = sideSize
-            setTextColor(Color.parseColor("#4B5563"))
+            includeFontPadding = false
+            setTypeface(activeTypeface, Typeface.NORMAL)
+            setTextColor(colorSubKeyText())
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
                 bottomMargin = verticalEdgeMargin
             }
@@ -761,26 +871,22 @@ class FlickImeService : InputMethodService() {
 
     private fun textFlickKey(spec: DirectionalSpec): View = directionalKey(spec) { commitTextSafe(it) }
 
-    private fun groupedFlickKey(label: String, spec: DirectionalSpec): View {
-        val key = directionalKey(spec, allowVertical = false) { commitAlphaChar(it) } as TextView
-        key.text = label
-        return key
-    }
+    private fun groupedFlickKey(label: String, spec: DirectionalSpec): View =
+        directionalKey(spec, allowVertical = false, keyLabel = label) { commitAlphaChar(it) }
 
     private fun directionalKey(
         spec: DirectionalSpec,
         allowVertical: Boolean = true,
+        keyLabel: String = spec.center,
         commit: (String) -> Unit
     ): View {
-        val key = TextView(this).apply {
-            text = displayLabel(spec.center)
-            gravity = Gravity.CENTER
-            textSize = 18f
-            setTypeface(typeface, Typeface.NORMAL)
-            setTextColor(Color.parseColor("#111827"))
-            background = keyBackground(Color.parseColor("#EEF1F5"), Color.parseColor("#A6AFBC"))
-            isClickable = true
-        }
+        val (key, _) = centeredLabelKey(
+            label = keyLabel,
+            textSizeSp = centerTextSp,
+            textStyle = Typeface.NORMAL,
+            textColor = colorKeyText()
+        )
+        key.background = keyBackground(colorKeyBackground(), colorKeyBorder())
 
         var startX = 0f
         var startY = 0f
@@ -823,63 +929,73 @@ class FlickImeService : InputMethodService() {
         return key
     }
 
-    private fun controlKey(label: String, onClick: () -> Unit): View {
-        return TextView(this).apply {
+    private fun centeredLabelKey(
+        label: String,
+        textSizeSp: Float,
+        textStyle: Int,
+        textColor: Int
+    ): Pair<FrameLayout, TextView> {
+        val container = FrameLayout(this).apply {
+            isClickable = true
+        }
+        val textView = TextView(this).apply {
             text = displayLabel(label)
             gravity = Gravity.CENTER
-            textSize = 14f
-            setTypeface(typeface, Typeface.NORMAL)
-            setTextColor(Color.parseColor("#1F2937"))
-            background = keyBackground(Color.parseColor("#C7D0DC"), Color.parseColor("#9AA4B2"))
-            setOnClickListener { playKeyClick(); onClick() }
+            textSize = textSizeSp
+            setTypeface(activeTypeface, textStyle)
+            includeFontPadding = false
+            setTextColor(textColor)
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.CENTER
+            )
         }
+        container.addView(textView)
+        return container to textView
     }
 
-    private fun modeSwitchKey(label: String, target: Mode): View {
-        val key = TextView(this).apply {
-            text = displayLabel(label)
-            gravity = Gravity.CENTER
-            textSize = 14f
-            setTypeface(typeface, Typeface.NORMAL)
-            setOnClickListener { playKeyClick(); switchMode(target) }
-        }
-        modeSwitchViews += key to target
-        applyModeSwitchStyle(key, selected = mode == target)
+    private fun controlKey(label: String, onClick: () -> Unit): View {
+        val (key, _) = centeredLabelKey(label, 14f, Typeface.NORMAL, colorKeyText())
+        key.background = keyBackground(colorKeyBackground(), colorKeyBorder())
+        key.setOnClickListener { playKeyClick(); onClick() }
         return key
     }
 
-    private fun applyModeSwitchStyle(v: TextView, selected: Boolean) {
+    private fun modeSwitchKey(label: String, target: Mode): View {
+        val (key, textView) = centeredLabelKey(label, 14f, Typeface.NORMAL, colorKeyText())
+        key.setOnClickListener { playKeyClick(); switchMode(target) }
+        val entry = ModeSwitchEntry(key, textView, target)
+        modeSwitchViews += entry
+        applyModeSwitchStyle(entry, selected = mode == target)
+        return key
+    }
+
+    private fun applyModeSwitchStyle(entry: ModeSwitchEntry, selected: Boolean) {
         if (selected) {
-            v.setTextColor(Color.WHITE)
-            v.background = keyBackground(Color.parseColor("#F59E0B"), Color.parseColor("#D97706"))
+            entry.label.setTextColor(colorAccentKeyText())
+            entry.container.background = keyBackground(colorAccentKeyBackground(), colorKeyBorder())
         } else {
-            v.setTextColor(Color.parseColor("#1F2937"))
-            v.background = keyBackground(Color.parseColor("#C7D0DC"), Color.parseColor("#9AA4B2"))
+            entry.label.setTextColor(colorKeyText())
+            entry.container.background = keyBackground(colorKeyBackground(), colorKeyBorder())
         }
     }
 
     private fun refreshModeSwitchStyles() {
         val iterator = modeSwitchViews.iterator()
         while (iterator.hasNext()) {
-            val (view, target) = iterator.next()
-            if (view.parent == null) {
+            val entry = iterator.next()
+            if (entry.container.parent == null) {
                 iterator.remove()
             } else {
-                applyModeSwitchStyle(view, mode == target)
+                applyModeSwitchStyle(entry, mode == entry.target)
             }
         }
     }
 
     private fun backspaceKey(): View {
-        val key = TextView(this).apply {
-            text = "⌫"
-            gravity = Gravity.CENTER
-            textSize = 14f
-            setTypeface(typeface, Typeface.NORMAL)
-            setTextColor(Color.parseColor("#1F2937"))
-            background = keyBackground(Color.parseColor("#C7D0DC"), Color.parseColor("#9AA4B2"))
-            isClickable = true
-        }
+        val (key, _) = centeredLabelKey("⌫", 14f, Typeface.NORMAL, colorKeyText())
+        key.background = keyBackground(colorKeyBackground(), colorKeyBorder())
 
         var startY = 0f
         var longPressActive = false
@@ -933,36 +1049,39 @@ class FlickImeService : InputMethodService() {
     }
 
     private fun primaryKey(label: String, onClick: () -> Unit): View {
-        return TextView(this).apply {
-            text = displayLabel(label)
-            gravity = Gravity.CENTER
-            textSize = 16f
-            setTypeface(typeface, Typeface.BOLD)
-            setTextColor(Color.WHITE)
-            background = keyBackground(Color.parseColor("#1677FF"), Color.parseColor("#1562CC"))
-            setOnClickListener { playKeyClick(); onClick() }
-        }
+        val (key, _) = centeredLabelKey(label, 16f, Typeface.BOLD, colorAccentKeyText())
+        key.background = keyBackground(colorAccentKeyBackground(), colorKeyBorder())
+        key.setOnClickListener { playKeyClick(); onClick() }
+        return key
     }
 
     private fun inputKey(label: String): View {
-        return TextView(this).apply {
-            text = displayLabel(label)
-            gravity = Gravity.CENTER
-            textSize = 16f
-            setTypeface(typeface, Typeface.NORMAL)
-            setTextColor(Color.parseColor("#111827"))
-            background = keyBackground(Color.parseColor("#EEF1F5"), Color.parseColor("#A6AFBC"))
-            setOnClickListener { playKeyClick(); commitTextSafe(label) }
-        }
+        val (key, _) = centeredLabelKey(label, 16f, Typeface.NORMAL, colorKeyText())
+        key.background = keyBackground(colorKeyBackground(), colorKeyBorder())
+        key.setOnClickListener { playKeyClick(); commitTextSafe(label) }
+        return key
     }
 
-    private fun keyBackground(fill: Int, stroke: Int): GradientDrawable {
-        return GradientDrawable().apply {
+    private fun keyBackground(fill: Int, stroke: Int): android.graphics.drawable.Drawable {
+        val bitmap = keyBgImage
+        val fillAlpha = if (bitmap == null) keyBgAlpha else (keyBgAlpha * 0.35f)
+        val strokeAlpha = if (bitmap == null) keyBgAlpha else (keyBgAlpha * 0.55f)
+        val fillLayer = GradientDrawable().apply {
             cornerRadius = dp(11).toFloat()
             orientation = GradientDrawable.Orientation.TOP_BOTTOM
-            colors = intArrayOf(lighten(fill), fill)
-            setStroke(dp(1), stroke)
+            colors = intArrayOf(withCustomAlpha(lighten(fill), fillAlpha), withCustomAlpha(fill, fillAlpha))
         }
+        val strokeLayer = GradientDrawable().apply {
+            cornerRadius = dp(11).toFloat()
+            setColor(Color.TRANSPARENT)
+            setStroke(dp(1), withCustomAlpha(stroke, strokeAlpha))
+        }
+        if (bitmap == null) return LayerDrawable(arrayOf(fillLayer, strokeLayer))
+        val imageLayer = BitmapDrawable(resources, bitmap).apply {
+            alpha = (keyImageAlpha.coerceIn(0f, 1f) * 255).toInt()
+            gravity = Gravity.FILL
+        }
+        return LayerDrawable(arrayOf(fillLayer, imageLayer, strokeLayer))
     }
 
     private fun makeHintBubble(text: String, center: Boolean): TextView {
@@ -970,13 +1089,13 @@ class FlickImeService : InputMethodService() {
             this.text = text
             gravity = Gravity.CENTER
             textSize = if (center) 19f else 17f
-            setTypeface(typeface, Typeface.BOLD)
-            setTextColor(Color.WHITE)
+            setTypeface(activeTypeface, Typeface.BOLD)
+            setTextColor(colorAccentKeyText())
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = dp(16).toFloat()
-                setColor(if (center) Color.parseColor("#2563EB") else Color.parseColor("#111827"))
-                setStroke(dp(2), Color.WHITE)
+                setColor(if (center) colorAccentKeyBackground() else colorKeyText())
+                setStroke(dp(2), colorAccentKeyText())
             }
             layoutParams = FrameLayout.LayoutParams(dp(58), dp(44))
             elevation = dp(60).toFloat()
@@ -1033,7 +1152,7 @@ class FlickImeService : InputMethodService() {
 
     private fun highlightHint(v: TextView, selected: Boolean) {
         val bg = v.background as GradientDrawable
-        bg.setColor(if (selected) Color.parseColor("#6B7280") else Color.parseColor("#111827"))
+        bg.setColor(if (selected) colorSelectedItemBackground() else colorKeyText())
     }
 
     private fun hideHintOverlay() {
@@ -1075,33 +1194,16 @@ class FlickImeService : InputMethodService() {
             KeyZone.Shengmu -> {
                 shengmuPart = text
                 composingText = buildComposingDisplay()
-                val query = buildQueryPinyin()
-                if (query.isNotBlank()) {
-                    allCandidates = try {
-                        if (composedSyllables.size > 1) pinyinEngine.queryCandidatesForSyllables(composedSyllables, 48)
-                        else pinyinEngine.queryCandidates(query, 48)
-                    } catch (_: Throwable) {
-                        emptyList()
-                    }
-                } else {
-                    allCandidates = emptyList()
-                }
             }
             KeyZone.Yunmu -> {
                 val full = (shengmuPart ?: "") + text
                 shengmuPart = null
                 composedSyllables += full.lowercase()
                 composingText = buildComposingDisplay()
-                val query = buildQueryPinyin()
-                allCandidates = try {
-                    if (composedSyllables.size > 1) pinyinEngine.queryCandidatesForSyllables(composedSyllables, 48)
-                    else pinyinEngine.queryCandidates(query, 48)
-                } catch (_: Throwable) {
-                    emptyList()
-                }
             }
         }
 
+        requestCandidatesAsync()
         refreshCandidateViews()
     }
 
@@ -1130,17 +1232,18 @@ class FlickImeService : InputMethodService() {
 
     private fun refreshCandidateViews() {
         composingView.text = if (composingText.isBlank()) "拼音" else composingText
-        composingView.setTextColor(if (composingText.isBlank()) Color.parseColor("#6B7280") else Color.parseColor("#1D4ED8"))
+        composingView.setTextColor(if (composingText.isBlank()) colorHintText() else colorAccentKeyBackground())
 
         candidateRow.removeAllViews()
-        allCandidates.take(12).forEach { c ->
+        allCandidates.take(12).forEach { candidate ->
             candidateRow.addView(TextView(this).apply {
-                text = c
+                text = candidate.text
                 textSize = 18f
-                setTextColor(Color.parseColor("#111827"))
+                setTypeface(activeTypeface, Typeface.NORMAL)
+                setTextColor(colorKeyText())
                 setPadding(dp(7), dp(1), dp(7), dp(1))
                 setOnClickListener {
-                    commitCandidate(c)
+                    commitCandidate(candidate)
                     if (mode == Mode.CANDIDATE) switchMode(Mode.FLICK)
                 }
             })
@@ -1149,17 +1252,18 @@ class FlickImeService : InputMethodService() {
 
     private fun refreshCandidateGrid() {
         candidateGrid.removeAllViews()
-        allCandidates.take(48).forEach { c ->
+        allCandidates.take(48).forEach { candidate ->
             val item = TextView(this).apply {
-                text = c
+                text = candidate.text
                 textSize = 24f
+                setTypeface(activeTypeface, Typeface.NORMAL)
                 gravity = Gravity.CENTER
                 minHeight = dp(44)
                 setPadding(dp(4), dp(6), dp(4), dp(6))
-                setTextColor(Color.parseColor("#111827"))
-                background = keyBackground(Color.parseColor("#EEF1F5"), Color.parseColor("#A6AFBC"))
+                setTextColor(colorKeyText())
+                background = keyBackground(colorKeyBackground(), colorKeyBorder())
                 setOnClickListener {
-                    commitCandidate(c)
+                    commitCandidate(candidate)
                     switchMode(Mode.FLICK)
                 }
             }
@@ -1171,43 +1275,58 @@ class FlickImeService : InputMethodService() {
         }
     }
 
-    private fun commitCandidate(text: String) {
-        val query = buildQueryPinyin()
-        if (query.isNotBlank()) {
-            pinyinEngine.recordUserChoice(query, text)
+    private fun commitCandidate(candidate: CandidateEntry) {
+        val current = composedSyllables.toList()
+        if (current.isEmpty()) {
+            commitTextSafe(candidate.text)
+            resetComposing()
+            return
         }
-        commitTextSafe(text)
-        resetComposing()
+        val consume = candidate.consumeSyllables.coerceIn(1, current.size)
+        val remaining = current.drop(consume)
+        val fullQuery = if (composingSessionFullQuery.isBlank()) current.joinToString("") else composingSessionFullQuery
+        val fullText = composingSessionCommittedText + candidate.text
+
+        commitTextSafe(candidate.text)
+
+        if (remaining.isEmpty()) {
+            if (fullQuery.isNotBlank() && fullText.isNotBlank()) {
+                candidateExecutor.execute {
+                    runCatching { pinyinEngine.recordUserChoice(fullQuery, fullText) }
+                }
+            }
+            resetComposing()
+            return
+        }
+
+        if (composingSessionFullQuery.isBlank()) {
+            composingSessionFullQuery = current.joinToString("")
+        }
+        composingSessionCommittedText += candidate.text
+        shengmuPart = null
+        composedSyllables.clear()
+        composedSyllables.addAll(remaining)
+        composingText = buildComposingDisplay()
+        requestCandidatesAsync()
+        refreshCandidateViews()
     }
 
     private fun backspace() {
+        if (composingSessionCommittedText.isNotBlank()) {
+            composingSessionCommittedText = ""
+            composingSessionFullQuery = ""
+        }
         if (shengmuPart != null) {
             shengmuPart = null
             composingText = buildComposingDisplay()
-            val query = buildQueryPinyin()
-            allCandidates = if (query.isNotBlank()) {
-                try {
-                    if (composedSyllables.size > 1) pinyinEngine.queryCandidatesForSyllables(composedSyllables, 48)
-                    else pinyinEngine.queryCandidates(query, 48)
-                } catch (_: Throwable) { emptyList() }
-            } else {
-                emptyList()
-            }
+            requestCandidatesAsync()
             refreshCandidateViews()
             return
         }
         if (composedSyllables.isNotEmpty()) {
             composedSyllables.removeAt(composedSyllables.lastIndex)
             composingText = buildComposingDisplay()
-            val query = buildQueryPinyin()
-            allCandidates = if (query.isNotBlank()) {
-                try {
-                    if (composedSyllables.size > 1) pinyinEngine.queryCandidatesForSyllables(composedSyllables, 48)
-                    else pinyinEngine.queryCandidates(query, 48)
-                } catch (_: Throwable) { emptyList() }
-            } else {
-                emptyList()
-            }
+            requestCandidatesAsync()
             refreshCandidateViews()
             return
         }
@@ -1226,7 +1345,14 @@ class FlickImeService : InputMethodService() {
         }
         val raw = buildRawPinyinForCommit()
         if (raw.isNotBlank()) {
+            val fullQuery = if (composingSessionFullQuery.isBlank()) raw else composingSessionFullQuery
+            val fullText = composingSessionCommittedText + raw
             commitTextSafe(raw)
+            if (fullQuery.isNotBlank() && fullText.isNotBlank()) {
+                candidateExecutor.execute {
+                    runCatching { pinyinEngine.recordUserChoice(fullQuery, fullText) }
+                }
+            }
             resetComposing()
             return
         }
@@ -1236,7 +1362,14 @@ class FlickImeService : InputMethodService() {
     private fun sendEnter() {
         val raw = buildRawPinyinForCommit()
         if (raw.isNotBlank()) {
+            val fullQuery = if (composingSessionFullQuery.isBlank()) raw else composingSessionFullQuery
+            val fullText = composingSessionCommittedText + raw
             commitTextSafe(raw)
+            if (fullQuery.isNotBlank() && fullText.isNotBlank()) {
+                candidateExecutor.execute {
+                    runCatching { pinyinEngine.recordUserChoice(fullQuery, fullText) }
+                }
+            }
             resetComposing()
             return
         }
@@ -1315,8 +1448,9 @@ class FlickImeService : InputMethodService() {
         if (clipboardHistory.isEmpty()) {
             clipboardList.addView(TextView(this).apply {
                 text = "暂无历史"
-                setTextColor(Color.parseColor("#6B7280"))
+                setTextColor(colorHintText())
                 textSize = 14f
+                setTypeface(activeTypeface, Typeface.NORMAL)
                 setPadding(dp(8), dp(8), dp(8), dp(8))
             })
             return
@@ -1327,9 +1461,10 @@ class FlickImeService : InputMethodService() {
                 maxLines = 2
                 ellipsize = TextUtils.TruncateAt.END
                 textSize = 16f
-                setTextColor(Color.parseColor("#111827"))
+                setTypeface(activeTypeface, Typeface.NORMAL)
+                setTextColor(colorKeyText())
                 setPadding(dp(10), dp(10), dp(10), dp(10))
-                background = keyBackground(Color.parseColor("#EEF1F5"), Color.parseColor("#A6AFBC"))
+                background = keyBackground(colorKeyBackground(), colorKeyBorder())
                 setOnClickListener {
                     commitTextSafe(item)
                     switchMode(Mode.FUNC)
@@ -1377,6 +1512,14 @@ class FlickImeService : InputMethodService() {
         }
     }
 
+    private fun hideImeWindow() {
+        playKeyClick()
+        try {
+            requestHideSelf(0)
+        } catch (_: Throwable) {
+        }
+    }
+
     private fun openImeSettings() {
         playKeyClick()
         try {
@@ -1400,11 +1543,106 @@ class FlickImeService : InputMethodService() {
     }
 
     private fun resetComposing() {
+        candidateToken.incrementAndGet()
         shengmuPart = null
         composedSyllables.clear()
         composingText = ""
         allCandidates = emptyList()
+        composingSessionFullQuery = ""
+        composingSessionCommittedText = ""
         refreshCandidateViews()
+    }
+
+    private fun computeCandidates(query: String, syllables: List<String>): List<CandidateEntry> {
+        if (query.isBlank()) return emptyList()
+        return try {
+            if (syllables.size <= 1) {
+                pinyinEngine.queryCandidates(query, 48).map { CandidateEntry(it, 1) }
+            } else {
+                computeMultiSyllableCandidates(syllables)
+            }
+        } catch (_: Throwable) {
+            emptyList()
+        }
+    }
+
+    private fun computeMultiSyllableCandidates(syllables: List<String>): List<CandidateEntry> {
+        val size = syllables.size
+        val out = ArrayList<CandidateEntry>(64)
+
+        fun addCandidate(text: String, consume: Int) {
+            if (text.isBlank()) return
+            val normalizedConsume = consume.coerceIn(1, size)
+            if (out.none { it.text == text && it.consumeSyllables == normalizedConsume }) {
+                out += CandidateEntry(text, normalizedConsume)
+            }
+        }
+
+        val fullQuery = syllables.joinToString("")
+        pinyinEngine.queryCandidates(fullQuery, 16).forEach { text ->
+            if (text.length >= 2) addCandidate(text, size)
+        }
+
+        buildGreedySentenceCandidate(syllables)?.let { addCandidate(it, size) }
+
+        val maxPrefix = minOf(size, 6)
+        for (consume in maxPrefix downTo 1) {
+            val prefix = syllables.take(consume).joinToString("")
+            val limit = if (consume == 1) 16 else 10
+            pinyinEngine.queryCandidates(prefix, limit).forEach { text ->
+                if (consume > 1 && text.length == 1) return@forEach
+                addCandidate(text, consume)
+            }
+        }
+
+        return out.take(48)
+    }
+
+    private fun buildGreedySentenceCandidate(syllables: List<String>): String? {
+        if (syllables.isEmpty()) return null
+        var i = 0
+        val sb = StringBuilder()
+        while (i < syllables.size) {
+            var chosen: String? = null
+            var chosenLen = 0
+            val maxChunk = minOf(4, syllables.size - i)
+            for (len in maxChunk downTo 1) {
+                val py = syllables.subList(i, i + len).joinToString("")
+                val candidates = pinyinEngine.queryCandidates(py, if (len == 1) 4 else 6)
+                val picked = candidates.firstOrNull { c ->
+                    if (len == 1) c.isNotBlank() else c.length >= 2
+                } ?: candidates.firstOrNull()
+                if (picked != null) {
+                    chosen = picked
+                    chosenLen = len
+                    break
+                }
+            }
+            if (chosen == null || chosenLen <= 0) return null
+            sb.append(chosen)
+            i += chosenLen
+        }
+        val sentence = sb.toString()
+        return sentence.takeIf { it.isNotBlank() }
+    }
+
+    private fun requestCandidatesAsync() {
+        val query = buildQueryPinyin()
+        val syllablesSnapshot = composedSyllables.toList()
+        val token = candidateToken.incrementAndGet()
+        if (query.isBlank()) {
+            allCandidates = emptyList()
+            return
+        }
+        allCandidates = emptyList()
+        candidateExecutor.execute {
+            val result = computeCandidates(query, syllablesSnapshot)
+            mainHandler.post {
+                if (token != candidateToken.get()) return@post
+                allCandidates = result
+                refreshCandidateViews()
+            }
+        }
     }
 
     private fun buildQueryPinyin(): String = composedSyllables.joinToString("")
@@ -1420,6 +1658,7 @@ class FlickImeService : InputMethodService() {
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
+    private fun dpf(v: Float): Int = (v * resources.displayMetrics.density).toInt()
 
     private fun displayLabel(text: String): String {
         val hasAsciiLetter = text.any { it in 'a'..'z' || it in 'A'..'Z' }
@@ -1428,16 +1667,28 @@ class FlickImeService : InputMethodService() {
 
     private fun playKeyClick() {
         try {
-            if (isSoundEnabled()) {
+            if (UiPrefs.getUseCustomSound(this) && customSoundId != 0) {
+                soundPool?.play(customSoundId, 1f, 1f, 1, 0, 1f)
+            } else if (isSoundEnabled()) {
                 audioManager.playSoundEffect(AudioManager.FX_KEY_CLICK, 0.45f)
             }
             if (isVibrationEnabled()) {
-                val vib = vibrator ?: return
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    vib.vibrate(VibrationEffect.createOneShot(8L, VibrationEffect.DEFAULT_AMPLITUDE))
-                } else {
-                    @Suppress("DEPRECATION")
-                    vib.vibrate(8L)
+                val hapticDone = if (::keyboardContainer.isInitialized) {
+                    keyboardContainer.performHapticFeedback(
+                    HapticFeedbackConstants.KEYBOARD_TAP,
+                    HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING
+                    )
+                } else false
+                if (!hapticDone) {
+                    val vib = vibrator
+                    if (vib != null && vib.hasVibrator()) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                            vib.vibrate(VibrationEffect.createOneShot(18L, VibrationEffect.DEFAULT_AMPLITUDE))
+                        } else {
+                            @Suppress("DEPRECATION")
+                            vib.vibrate(18L)
+                        }
+                    }
                 }
             }
         } catch (_: Throwable) {
@@ -1472,6 +1723,83 @@ class FlickImeService : InputMethodService() {
         keyboardContainer.removeViewAt(index)
         keyboardContainer.addView(newPanel, index)
         alphaPanel = newPanel
+    }
+
+    private fun reloadCustomUiSettings() {
+        activeTypeface = FontManager.resolveTypeface(this)
+        centerTextSp = UiPrefs.getCenterTextSp(this)
+        sideTextSp = UiPrefs.getSideTextSp(this)
+        keyTextAlpha = UiPrefs.getKeyTextAlpha(this)
+        keyImageAlpha = UiPrefs.getKeyImageAlpha(this)
+        keyBgAlpha = UiPrefs.getKeyBgAlpha(this)
+        keySizeScale = UiPrefs.getKeySizeScale(this).coerceIn(0.75f, 1.25f)
+        keyGapDp = UiPrefs.getKeyGapDp(this).coerceIn(0f, 14f)
+        keyboardBgImage = loadBitmap(UiPrefs.getImeBgImagePath(this))
+        keyBgImage = loadBitmap(UiPrefs.getKeyBgImagePath(this))
+        reloadCustomSound()
+    }
+
+    private fun loadBitmap(path: String): android.graphics.Bitmap? {
+        if (path.isBlank()) return null
+        return try {
+            if (path.startsWith("asset://")) {
+                assets.open(path.removePrefix("asset://")).use { BitmapFactory.decodeStream(it) }
+            } else {
+                val f = File(path)
+                if (!f.exists()) null else f.inputStream().use { BitmapFactory.decodeStream(it) }
+            }
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    private fun reloadCustomSound() {
+        soundPool?.release()
+        soundPool = null
+        customSoundId = 0
+        if (!UiPrefs.getUseCustomSound(this)) return
+        val path = UiPrefs.getCustomSoundPath(this)
+        if (path.isBlank() || !File(path).exists()) return
+        val attrs = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
+        soundPool = SoundPool.Builder().setMaxStreams(2).setAudioAttributes(attrs).build().also {
+            customSoundId = it.load(path, 1)
+        }
+    }
+
+    private fun colorKeyboardBackground(): Int = colorOrDefault(keyboardTheme.colors.keyboardBackground, "#AEB7C5")
+    private fun colorPanelBackground(): Int = colorOrDefault(keyboardTheme.colors.panelBackground, "#BBC4D2")
+    private fun resolvedPanelBackground(): Int {
+        val base = colorPanelBackground()
+        return if (keyboardBgImage == null) base else withCustomAlpha(base, 0.08f)
+    }
+    private fun colorKeyBackground(): Int = colorOrDefault(keyboardTheme.colors.keyBackground, "#EEF1F5")
+    private fun colorKeyBorder(): Int = colorOrDefault(keyboardTheme.colors.keyBorder, "#A6AFBC")
+    private fun colorKeyText(): Int = withAlpha(colorOrDefault(keyboardTheme.colors.keyText, "#111827"))
+    private fun colorSubKeyText(): Int = withAlpha(colorOrDefault(keyboardTheme.colors.subKeyText, "#4B5563"))
+    private fun colorAccentKeyBackground(): Int = colorOrDefault(keyboardTheme.colors.accentKeyBackground, "#1677FF")
+    private fun colorAccentKeyText(): Int = withAlpha(colorOrDefault(keyboardTheme.colors.accentKeyText, "#FFFFFF"))
+    private fun colorSelectedItemBackground(): Int = colorOrDefault(keyboardTheme.colors.selectedItemBackground, "#6B7280")
+    private fun colorHintText(): Int = colorOrDefault(keyboardTheme.colors.hintText, "#6B7280")
+
+    private fun colorOrDefault(value: String, fallback: String): Int {
+        return try {
+            Color.parseColor(value)
+        } catch (_: Throwable) {
+            Color.parseColor(fallback)
+        }
+    }
+
+    private fun withAlpha(color: Int): Int {
+        val a = (keyTextAlpha.coerceIn(0f, 1f) * 255).toInt()
+        return Color.argb(a, Color.red(color), Color.green(color), Color.blue(color))
+    }
+
+    private fun withCustomAlpha(color: Int, alpha: Float): Int {
+        val a = (alpha.coerceIn(0f, 1f) * 255).toInt()
+        return Color.argb(a, Color.red(color), Color.green(color), Color.blue(color))
     }
 
     private fun isSoundEnabled(): Boolean {
