@@ -9,6 +9,8 @@ B站主页：
 ## 当前版本
 - `1.0` 安装包（保留）：`release/CNflick-debug.apk`
 - `1.1` 安装包（新增）：`release/CNflick-v1.1-debug.apk`
+- GitHub Release（1.1）：https://github.com/3121455692atou-sudo/CNflick/releases/tag/v1.1.0
+- GitHub Release（1.0）：https://github.com/3121455692atou-sudo/CNflick/releases/tag/v0.1.0
 
 详细改动请看：`docs/RELEASE.md`
 

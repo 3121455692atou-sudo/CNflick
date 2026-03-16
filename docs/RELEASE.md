@@ -4,6 +4,8 @@
 APK：
 - 1.0（保留）：`release/CNflick-debug.apk`
 - 1.1（新增）：`release/CNflick-v1.1-debug.apk`
+- GitHub Release：
+  - https://github.com/3121455692atou-sudo/CNflick/releases/tag/v1.1.0
 
 相较 v0.1.0 / 1.0 的主要新增与修复：
 - 新增外观系统：背景图/按键图导入后自动裁切并进入可选列表
