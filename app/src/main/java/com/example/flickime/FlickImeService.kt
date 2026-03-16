@@ -265,6 +265,15 @@ class FlickImeService : InputMethodService() {
         rebuildPanelsFromSettings()
     }
 
+    override fun onWindowShown() {
+        super.onWindowShown()
+        keyboardTheme = ThemeManager.getCurrentTheme(this)
+        reloadCustomUiSettings()
+        updateRootBackground()
+        rebuildPanelsFromSettings()
+        refreshCandidateViews()
+    }
+
     private fun updateRootBackground() {
         val inputRoot = inputRootView ?: return
         if (keyboardBgImage == null) {
@@ -291,7 +300,7 @@ class FlickImeService : InputMethodService() {
 
         val outerPadding = dp(8)
         rowGap = dpf(keyGapDp.coerceIn(0f, 14f))
-        candidateStripHeight = if (isLandscape) dp(40) else dp(50)
+        candidateStripHeight = if (isLandscape) dp(44) else dp(56)
 
         val usable = screenWidth - outerPadding
         colWidth = ((usable - rowGap * 4) / 5f).toInt().coerceAtLeast(dp(54))
@@ -310,7 +319,7 @@ class FlickImeService : InputMethodService() {
     private fun buildCandidateStrip(): View {
         val strip = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(resolvedPanelBackground())
+            setBackgroundColor(resolvedCandidatePanelBackground())
             setPadding(dp(8), dp(4), dp(8), dp(4))
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, candidateStripHeight)
         }
@@ -327,18 +336,21 @@ class FlickImeService : InputMethodService() {
         val bottom = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(Color.TRANSPARENT)
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f)
         }
 
         val scroller = HorizontalScrollView(this).apply {
             isHorizontalScrollBarEnabled = false
             overScrollMode = View.OVER_SCROLL_NEVER
+            setBackgroundColor(Color.TRANSPARENT)
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f)
         }
 
         candidateRow = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(Color.TRANSPARENT)
         }
         scroller.addView(candidateRow)
 
@@ -466,6 +478,7 @@ class FlickImeService : InputMethodService() {
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(Color.TRANSPARENT)
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44))
         }
         val title = TextView(this).apply {
@@ -508,7 +521,7 @@ class FlickImeService : InputMethodService() {
     private fun buildCandidatePanel(): View {
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(resolvedPanelBackground())
+            setBackgroundColor(resolvedCandidatePanelBackground())
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             setPadding(dp(8), dp(8), dp(8), dp(8))
         }
@@ -516,6 +529,7 @@ class FlickImeService : InputMethodService() {
         val header = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
+            setBackgroundColor(Color.TRANSPARENT)
             layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(44))
         }
 
@@ -527,7 +541,7 @@ class FlickImeService : InputMethodService() {
             layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f)
         }
 
-        val close = controlKey("返回") { switchMode(Mode.FLICK) }
+        val close = controlKey("返回", transparentWhenImageBg = true) { switchMode(Mode.FLICK) }
         close.layoutParams = LinearLayout.LayoutParams(dp(88), dp(40))
 
         header.addView(title)
@@ -955,9 +969,13 @@ class FlickImeService : InputMethodService() {
         return container to textView
     }
 
-    private fun controlKey(label: String, onClick: () -> Unit): View {
+    private fun controlKey(label: String, transparentWhenImageBg: Boolean = false, onClick: () -> Unit): View {
         val (key, _) = centeredLabelKey(label, 14f, Typeface.NORMAL, colorKeyText())
-        key.background = keyBackground(colorKeyBackground(), colorKeyBorder())
+        if (transparentWhenImageBg && hasImageBackgroundForUi()) {
+            key.background = null
+        } else {
+            key.background = keyBackground(colorKeyBackground(), colorKeyBorder())
+        }
         key.setOnClickListener { playKeyClick(); onClick() }
         return key
     }
@@ -1235,13 +1253,19 @@ class FlickImeService : InputMethodService() {
         composingView.setTextColor(if (composingText.isBlank()) colorHintText() else colorAccentKeyBackground())
 
         candidateRow.removeAllViews()
+        val rowItemBg = candidateItemBackground()
         allCandidates.take(12).forEach { candidate ->
             candidateRow.addView(TextView(this).apply {
                 text = candidate.text
                 textSize = 18f
                 setTypeface(activeTypeface, Typeface.NORMAL)
                 setTextColor(colorKeyText())
-                setPadding(dp(7), dp(1), dp(7), dp(1))
+                includeFontPadding = true
+                gravity = Gravity.CENTER
+                minHeight = dp(34)
+                setPadding(dp(8), dp(3), dp(8), dp(4))
+                if (rowItemBg != null) background = rowItemBg.constantState?.newDrawable()?.mutate()
+                else setBackgroundColor(Color.TRANSPARENT)
                 setOnClickListener {
                     commitCandidate(candidate)
                     if (mode == Mode.CANDIDATE) switchMode(Mode.FLICK)
@@ -1257,11 +1281,13 @@ class FlickImeService : InputMethodService() {
                 text = candidate.text
                 textSize = 24f
                 setTypeface(activeTypeface, Typeface.NORMAL)
+                includeFontPadding = true
                 gravity = Gravity.CENTER
-                minHeight = dp(44)
-                setPadding(dp(4), dp(6), dp(4), dp(6))
+                minHeight = dp(52)
+                setPadding(dp(4), dp(8), dp(4), dp(9))
                 setTextColor(colorKeyText())
-                background = keyBackground(colorKeyBackground(), colorKeyBorder())
+                val bg = candidateItemBackground()
+                if (bg != null) background = bg else setBackgroundColor(Color.TRANSPARENT)
                 setOnClickListener {
                     commitCandidate(candidate)
                     switchMode(Mode.FLICK)
@@ -1626,6 +1652,11 @@ class FlickImeService : InputMethodService() {
         return sentence.takeIf { it.isNotBlank() }
     }
 
+    private fun candidateItemBackground(): android.graphics.drawable.Drawable? {
+        // 导入输入法背景图后，候选网格去掉实体框，避免遮挡背景。
+        return if (hasImageBackgroundForUi()) null else keyBackground(colorKeyBackground(), colorKeyBorder())
+    }
+
     private fun requestCandidatesAsync() {
         val query = buildQueryPinyin()
         val syllablesSnapshot = composedSyllables.toList()
@@ -1726,6 +1757,7 @@ class FlickImeService : InputMethodService() {
     }
 
     private fun reloadCustomUiSettings() {
+        keyboardTheme = ThemeManager.getCurrentTheme(this)
         activeTypeface = FontManager.resolveTypeface(this)
         centerTextSp = UiPrefs.getCenterTextSp(this)
         sideTextSp = UiPrefs.getSideTextSp(this)
@@ -1774,6 +1806,13 @@ class FlickImeService : InputMethodService() {
     private fun resolvedPanelBackground(): Int {
         val base = colorPanelBackground()
         return if (keyboardBgImage == null) base else withCustomAlpha(base, 0.08f)
+    }
+    private fun resolvedCandidatePanelBackground(): Int {
+        return if (hasImageBackgroundForUi()) Color.TRANSPARENT else resolvedPanelBackground()
+    }
+    private fun hasImageBackgroundForUi(): Boolean {
+        if (keyboardBgImage != null || keyBgImage != null) return true
+        return UiPrefs.getImeBgImagePath(this).isNotBlank() || UiPrefs.getKeyBgImagePath(this).isNotBlank()
     }
     private fun colorKeyBackground(): Int = colorOrDefault(keyboardTheme.colors.keyBackground, "#EEF1F5")
     private fun colorKeyBorder(): Int = colorOrDefault(keyboardTheme.colors.keyBorder, "#A6AFBC")
