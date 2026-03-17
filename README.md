@@ -9,7 +9,7 @@
 - v1.1：https://github.com/3121455692atou-sudo/CNflick/releases/download/v1.1.0/CNflick-v1.1-debug.apk
 - v0.1.0：https://github.com/3121455692atou-sudo/CNflick/releases/download/v0.1.0/CNflick-debug.apk
 
-## v1.2（相对 v1.1）新增
+## v1.2 新增
 - 拼音/符号映射支持八方向滑动输入，并可分别开关：
   - 拼音八方向默认关闭。
   - 符号八方向默认开启。
