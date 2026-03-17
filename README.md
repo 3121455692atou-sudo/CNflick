@@ -3,8 +3,7 @@
 兼顾效率和准度的 12 键 Flick 中文输入法。
 
 开发者：忧郁乔班尼  
-B站主页：  
-[https://m.bilibili.com/space/431314757?spm_id_from=333.1369.opus.module_author_avatar.click](https://m.bilibili.com/space/431314757?spm_id_from=333.1369.opus.module_author_avatar.click)
+
 
 ## 当前版本
 - `1.0` 安装包（保留）：`release/CNflick-debug.apk`
