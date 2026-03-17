@@ -4,24 +4,28 @@
 
 开发者：忧郁乔班尼  
 
-## v1.2 更新
-- 移除系统语音输入功能（含相关开关和权限）。
-- 八方向滑动改为独立开关：
+## APK 下载
+- v1.2（最新）：https://github.com/3121455692atou-sudo/CNflick/releases/download/v1.2.0/CNflick-v1.2-debug.apk
+- v1.1：https://github.com/3121455692atou-sudo/CNflick/releases/download/v1.1.0/CNflick-v1.1-debug.apk
+- v0.1.0：https://github.com/3121455692atou-sudo/CNflick/releases/download/v0.1.0/CNflick-debug.apk
+
+## v1.2（相对 v1.1）新增
+- 拼音/符号映射支持八方向滑动输入，并可分别开关：
   - 拼音八方向默认关闭。
   - 符号八方向默认开启。
-- 按键文字显示新增独立开关：
-  - 可关闭中间大字。
-  - 可关闭四周小字。
-- 八方向斜向映射会同步显示在按键四角小字。
-- 符号默认映射重做为 12 键 * 9 向，括号映射成对且方向规律统一。
-- 安装指引页补充实用技巧文案。
+- 自定义映射菜单分层：
+  - 二级菜单配置正向（中/左/上/右/下）。
+  - 三级菜单配置斜向（左上/右上/左下/右下）。
+- 斜向映射会同步显示在按键四角小字。
+- 新增按键文字显示开关：
+  - 可单独关闭中间文字。
+  - 可单独关闭四周小字。
+- 符号默认映射重构为 12 键 * 9 向，括号类符号成对且方向统一。
+- 主题包能力增强：一键导入/切换主题包，支持主题、字体、背景图、按键图、音效的整包管理。
+- 新增主题包模板示例与初音预设主题包（含 Mono 字体）。
 
 详细版本记录见 [docs/RELEASE.md](docs/RELEASE.md)。
-
-## APK 文件
-- `release/CNflick-debug.apk`（旧版保留）
-- `release/CNflick-v1.1-debug.apk`（旧版保留）
-- `release/CNflick-v1.2-debug.apk`（当前版）
+主题包制作规范见 [docs/THEME_PACK.md](docs/THEME_PACK.md)。
 
 ## 编译（给二创作者）
 ```bash
