@@ -30,6 +30,24 @@ object ThemeManager {
         )
     )
 
+    private val defaultDarkTheme = KeyboardTheme(
+        id = "cnflick.theme.default_dark",
+        name = "默认深色",
+        colors = ThemeColors(
+            keyboardBackground = "#111827",
+            panelBackground = "#0B1220",
+            keyBackground = "#1F2937",
+            keyBorder = "#374151",
+            keyText = "#F9FAFB",
+            subKeyText = "#CBD5E1",
+            accentKeyBackground = "#3B82F6",
+            accentKeyText = "#FFFFFF",
+            selectedItemBackground = "#4B5563",
+            selectedItemText = "#FFFFFF",
+            hintText = "#94A3B8"
+        )
+    )
+
     private val mikuTheme = KeyboardTheme(
         id = "com.cnflick.theme.hatsune_miku_teal",
         name = "初音未来 Teal",
@@ -48,7 +66,7 @@ object ThemeManager {
         )
     )
 
-    fun getBuiltInThemes(): List<KeyboardTheme> = listOf(defaultTheme, mikuTheme)
+    fun getBuiltInThemes(): List<KeyboardTheme> = listOf(defaultTheme, defaultDarkTheme, mikuTheme)
 
     fun getCurrentTheme(context: Context): KeyboardTheme {
         val currentId = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -80,7 +98,20 @@ object ThemeManager {
         context.contentResolver.openInputStream(uri)?.use { input ->
             copiedZip.outputStream().use { output -> input.copyTo(output) }
         } ?: error("无法读取主题包")
+        return registerImportedThemeFile(context, copiedZip)
+    }
 
+    fun importThemeZipFile(context: Context, sourceFile: File): KeyboardTheme {
+        if (!sourceFile.exists() || !sourceFile.isFile) error("主题包文件不存在")
+        val themesDir = File(context.filesDir, "themes").apply { mkdirs() }
+        val copiedZip = File(themesDir, "imported_${System.currentTimeMillis()}.cnflick-theme.zip")
+        sourceFile.inputStream().use { input ->
+            copiedZip.outputStream().use { output -> input.copyTo(output) }
+        }
+        return registerImportedThemeFile(context, copiedZip)
+    }
+
+    private fun registerImportedThemeFile(context: Context, copiedZip: File): KeyboardTheme {
         val parsed = parseThemeZip(copiedZip)
         val imported = loadImportedThemeJson(context)
 

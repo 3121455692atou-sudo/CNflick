@@ -1,0 +1,12 @@
+{
+  "packId": "demo.pink.template",
+  "packName": "粉色主题包模板",
+  "version": "1.0.0",
+  "themeId": "cnflick.theme.pink_template",
+  "assets": {
+    "font": "assets/font.ttf",
+    "imeBackground": "assets/ime_background.png",
+    "keyBackground": "assets/key_background.png",
+    "keySound": "assets/key_sound.wav"
+  }
+}

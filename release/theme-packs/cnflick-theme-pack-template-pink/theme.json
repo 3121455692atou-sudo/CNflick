@@ -1,0 +1,19 @@
+{
+  "id": "cnflick.theme.pink_template",
+  "name": "粉色模板主题",
+  "version": "1.0.0",
+  "author": "template",
+  "colors": {
+    "keyboardBackground": "#F9DDEB",
+    "panelBackground": "#F6CCE1",
+    "keyBackground": "#FFF0F7",
+    "keyBorder": "#E8AFCB",
+    "keyText": "#5A2440",
+    "subKeyText": "#8B4564",
+    "accentKeyBackground": "#E867A8",
+    "accentKeyText": "#FFFFFF",
+    "selectedItemBackground": "#C5548D",
+    "selectedItemText": "#FFFFFF",
+    "hintText": "#9A4F73"
+  }
+}

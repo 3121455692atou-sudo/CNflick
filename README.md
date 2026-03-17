@@ -1,59 +1,32 @@
 # CNflick
 
-兼顾效率和准度的 12 键 Flick 中文输入法。
+12 键 Flick 中文输入法。
 
 开发者：忧郁乔班尼  
 
+## v1.2 更新
+- 移除系统语音输入功能（含相关开关和权限）。
+- 八方向滑动改为独立开关：
+  - 拼音八方向默认关闭。
+  - 符号八方向默认开启。
+- 按键文字显示新增独立开关：
+  - 可关闭中间大字。
+  - 可关闭四周小字。
+- 八方向斜向映射会同步显示在按键四角小字。
+- 符号默认映射重做为 12 键 * 9 向，括号映射成对且方向规律统一。
+- 安装指引页补充实用技巧文案。
 
-## 当前版本
-- `1.0` 安装包（保留）：`release/CNflick-debug.apk`
-- `1.1` 安装包（新增）：`release/CNflick-v1.1-debug.apk`
-- GitHub Release（1.1）：https://github.com/3121455692atou-sudo/CNflick/releases/tag/v1.1.0
-- GitHub Release（1.0）：https://github.com/3121455692atou-sudo/CNflick/releases/tag/v0.1.0
+详细版本记录见 [docs/RELEASE.md](docs/RELEASE.md)。
 
-详细改动请看：`docs/RELEASE.md`
+## APK 文件
+- `release/CNflick-debug.apk`（旧版保留）
+- `release/CNflick-v1.1-debug.apk`（旧版保留）
+- `release/CNflick-v1.2-debug.apk`（当前版）
 
-## 项目简介
-CNflick 是 Android 自定义输入法项目，核心能力：
-- 中文拼音 12 键 Flick（支持映射自定义）
-- 英文/数字/符号/功能副键盘
-- 候选栏 + 候选展开页 + 动态调频
-- 长拼音分段候选与整句学习
-- 剪贴板历史、方向键、复制粘贴等效率功能
-- 主题 / 字体 / 背景图 / 按键图 / 词库 / 快捷词库自定义
-
-## 快速安装
-1. 手机启用开发者选项与 USB 调试。
-2. 安装 1.1：
-```bash
-adb install -r release/CNflick-v1.1-debug.apk
-```
-3. 系统设置中启用并切换到 `CNflick` 输入法。
-
-## 使用与教程
-- 使用总教程：`docs/USER_GUIDE.md`
-- 主题包制作教程：`docs/THEME_PACK.md`
-- 词库来源与重建：`docs/LEXICON_SOURCES.md`
-- GitHub 发布与 Clash 代理流程：`docs/GITHUB_PUBLISH.md`
-
-## 目录结构
-- `app/src/main/java/com/example/flickime/FlickImeService.kt`：输入法主服务与键盘 UI
-- `app/src/main/java/com/example/flickime/ImeSettingsActivity.kt`：设置页
-- `app/src/main/java/com/example/flickime/LexiconSettingsActivity.kt`：词库/快捷词库页
-- `app/src/main/java/com/example/flickime/engine/PinyinEngine.kt`：候选与学习引擎
-- `app/src/main/java/com/example/flickime/engine/LexiconManager.kt`：多词库管理
-- `app/src/main/java/com/example/flickime/theme/`：主题/字体/背景资源管理
-- `tools/`：词库构建脚本
-- `release/theme-packs/`：示例主题包
-
-## 构建
+## 编译（给二创作者）
 ```bash
 ./gradlew :app:assembleDebug
 ```
 
-产物：
+输出 APK：
 - `app/build/outputs/apk/debug/app-debug.apk`
-
-## 开源说明
-- 本项目为实验性输入法实现，适合二次开发与研究。
-- 词库与外部资源请遵守其各自许可证。

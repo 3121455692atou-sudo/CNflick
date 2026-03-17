@@ -47,14 +47,13 @@ object FontManager {
             id == "font.jetbrains_mono" -> runCatching {
                 Typeface.createFromAsset(context.assets, "fonts/JetBrainsMono-Regular.ttf")
             }.getOrDefault(Typeface.MONOSPACE)
-            id.startsWith("font.custom.") -> {
+            else -> {
                 val custom = loadImportedFonts(context).firstOrNull { it.id == id }
                 val path = custom?.filePath
                 if (path.isNullOrBlank()) Typeface.DEFAULT else runCatching {
                     Typeface.createFromFile(path)
                 }.getOrDefault(Typeface.DEFAULT)
             }
-            else -> Typeface.DEFAULT
         }
     }
 
@@ -64,19 +63,47 @@ object FontManager {
         context.contentResolver.openInputStream(uri)?.use { input ->
             file.outputStream().use { output -> input.copyTo(output) }
         } ?: error("无法读取字体文件")
-        val font = KeyboardFont(
+        return registerFontFile(
+            context = context,
             id = "font.custom.${file.nameWithoutExtension}",
             name = "自定义字体 ${file.nameWithoutExtension.takeLast(6)}",
+            filePath = file.absolutePath,
+            activate = true
+        )
+    }
+
+    fun registerFontFile(
+        context: Context,
+        id: String,
+        name: String,
+        filePath: String,
+        activate: Boolean = false
+    ): KeyboardFont {
+        require(id.isNotBlank()) { "字体 id 不能为空" }
+        val file = File(filePath)
+        require(file.exists() && file.isFile) { "字体文件不存在" }
+
+        val font = KeyboardFont(
+            id = id,
+            name = name.ifBlank { "自定义字体" },
             filePath = file.absolutePath
         )
-        val arr = loadImportedFontJson(context)
-        arr.put(JSONObject().apply {
-            put("id", font.id)
-            put("name", font.name)
-            put("path", font.filePath)
-        })
-        saveImportedFontJson(context, arr)
-        setCurrentFontId(context, font.id)
+        val imported = loadImportedFontJson(context)
+        val rewritten = JSONArray()
+        for (i in 0 until imported.length()) {
+            val item = imported.optJSONObject(i) ?: continue
+            if (item.optString("id") == id) continue
+            rewritten.put(item)
+        }
+        rewritten.put(
+            JSONObject().apply {
+                put("id", font.id)
+                put("name", font.name)
+                put("path", font.filePath)
+            }
+        )
+        saveImportedFontJson(context, rewritten)
+        if (activate) setCurrentFontId(context, font.id)
         return font
     }
 

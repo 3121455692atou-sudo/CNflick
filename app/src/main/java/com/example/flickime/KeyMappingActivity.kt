@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -45,6 +46,7 @@ class KeyMappingActivity : ComponentActivity() {
 }
 
 private enum class MappingType { PINYIN, SYMBOL }
+private enum class MappingMenuLevel { MAIN, DIAGONAL }
 
 private data class KeyEdit(
     var center: String,
@@ -52,6 +54,10 @@ private data class KeyEdit(
     var up: String,
     var right: String,
     var down: String,
+    var upLeft: String,
+    var upRight: String,
+    var downLeft: String,
+    var downRight: String,
     val zoneName: String
 )
 
@@ -67,13 +73,14 @@ private fun KeyMappingScreen() {
     val initial = remember {
         when (mappingType) {
             MappingType.PINYIN -> KeyMapStore.loadPinyinKeys(context).map {
-                KeyEdit(it.center, it.left, it.up, it.right, it.down, it.zone.name)
+                KeyEdit(it.center, it.left, it.up, it.right, it.down, it.upLeft, it.upRight, it.downLeft, it.downRight, it.zone.name)
             }
             MappingType.SYMBOL -> KeyMapStore.loadSymbolKeys(context).map {
-                KeyEdit(it.center, it.left, it.up, it.right, it.down, "Symbol")
+                KeyEdit(it.center, it.left, it.up, it.right, it.down, it.upLeft, it.upRight, it.downLeft, it.downRight, "Symbol")
             }
         }
     }
+    var menuLevel by remember { mutableStateOf(MappingMenuLevel.MAIN) }
     val edits = remember {
         mutableStateListOf<KeyEdit>().apply {
             addAll(initial)
@@ -100,6 +107,10 @@ private fun KeyMappingScreen() {
                         up = o.optString("up", ""),
                         right = o.optString("right", ""),
                         down = o.optString("down", ""),
+                        upLeft = o.optString("upLeft", ""),
+                        upRight = o.optString("upRight", ""),
+                        downLeft = o.optString("downLeft", ""),
+                        downRight = o.optString("downRight", ""),
                         zoneName = zone
                     )
                 )
@@ -121,6 +132,10 @@ private fun KeyMappingScreen() {
                         put("up", it.up)
                         put("right", it.right)
                         put("down", it.down)
+                        put("upLeft", it.upLeft)
+                        put("upRight", it.upRight)
+                        put("downLeft", it.downLeft)
+                        put("downRight", it.downRight)
                     }
                 )
             }
@@ -143,23 +158,50 @@ private fun KeyMappingScreen() {
     ) {
         val title = if (mappingType == MappingType.PINYIN) "自定义拼音12键映射" else "自定义符号12键映射"
         Text(title, fontSize = 22.sp)
-        Text("每个键可改 5 个方向：中/左/上/右/下。保存后回到输入法立即生效。")
+        if (menuLevel == MappingMenuLevel.MAIN) {
+            Text("二级菜单：正向映射（中/左/上/右/下）")
+            Text("保存后立即生效。斜向映射默认留空，需在三级菜单单独配置。")
+            OutlinedButton(onClick = { menuLevel = MappingMenuLevel.DIAGONAL }, modifier = Modifier.fillMaxWidth()) {
+                Text("进入三级菜单：斜向映射（左上/右上/左下/右下）")
+            }
+        } else {
+            Text("三级菜单：斜向映射（左上/右上/左下/右下）")
+            Text("仅在对应输入类型的“八方向滑行输入”开启后生效。留空即该斜向不输出。")
+            OutlinedButton(onClick = { menuLevel = MappingMenuLevel.MAIN }, modifier = Modifier.fillMaxWidth()) {
+                Text("返回二级菜单：正向映射")
+            }
+        }
 
         edits.forEachIndexed { index, item ->
-            KeyEditCard(
-                index = index + 1,
-                zoneName = item.zoneName,
-                center = item.center,
-                left = item.left,
-                up = item.up,
-                right = item.right,
-                down = item.down,
-                onCenter = { item.center = it },
-                onLeft = { item.left = it },
-                onUp = { item.up = it },
-                onRight = { item.right = it },
-                onDown = { item.down = it }
-            )
+            if (menuLevel == MappingMenuLevel.MAIN) {
+                KeyEditCard(
+                    index = index + 1,
+                    zoneName = item.zoneName,
+                    center = item.center,
+                    left = item.left,
+                    up = item.up,
+                    right = item.right,
+                    down = item.down,
+                    onCenter = { item.center = it },
+                    onLeft = { item.left = it },
+                    onUp = { item.up = it },
+                    onRight = { item.right = it },
+                    onDown = { item.down = it }
+                )
+            } else {
+                DiagonalEditCard(
+                    index = index + 1,
+                    zoneName = item.zoneName,
+                    upLeft = item.upLeft,
+                    upRight = item.upRight,
+                    downLeft = item.downLeft,
+                    downRight = item.downRight,
+                    onUpLeft = { item.upLeft = it },
+                    onUpRight = { item.upRight = it },
+                    onDownLeft = { item.downLeft = it },
+                    onDownRight = { item.downRight = it }
+                )
+            }
         }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -168,12 +210,12 @@ private fun KeyMappingScreen() {
                 if (mappingType == MappingType.PINYIN) {
                     val def = com.example.flickime.data.DefaultKeyMap.keys
                     def.forEach {
-                        edits.add(KeyEdit(it.center, it.left, it.up, it.right, it.down, it.zone.name))
+                        edits.add(KeyEdit(it.center, it.left, it.up, it.right, it.down, it.upLeft, it.upRight, it.downLeft, it.downRight, it.zone.name))
                     }
                 } else {
                     val def = DefaultSymbolMap.keys
                     def.forEach {
-                        edits.add(KeyEdit(it.center, it.left, it.up, it.right, it.down, "Symbol"))
+                        edits.add(KeyEdit(it.center, it.left, it.up, it.right, it.down, it.upLeft, it.upRight, it.downLeft, it.downRight, "Symbol"))
                     }
                 }
             }, modifier = Modifier.weight(1f)) {
@@ -184,24 +226,31 @@ private fun KeyMappingScreen() {
                     val old = KeyMapStore.loadPinyinKeys(context)
                     val newKeys = edits.mapIndexed { i, e ->
                         FlickKeySpec(
-                            center = e.center.ifBlank { old[i].center },
-                            left = e.left.ifBlank { old[i].left },
-                            up = e.up.ifBlank { old[i].up },
-                            right = e.right.ifBlank { old[i].right },
-                            down = e.down.ifBlank { old[i].down },
+                            center = e.center,
+                            left = e.left,
+                            up = e.up,
+                            right = e.right,
+                            down = e.down,
+                            upLeft = e.upLeft,
+                            upRight = e.upRight,
+                            downLeft = e.downLeft,
+                            downRight = e.downRight,
                             zone = old[i].zone
                         )
                     }
                     KeyMapStore.savePinyinKeys(context, newKeys)
                 } else {
-                    val old = KeyMapStore.loadSymbolKeys(context)
-                    val newKeys = edits.mapIndexed { i, e ->
+                    val newKeys = edits.map { e ->
                         DirectionalKeySpec(
-                            center = e.center.ifBlank { old[i].center },
-                            left = e.left.ifBlank { old[i].left },
-                            up = e.up.ifBlank { old[i].up },
-                            right = e.right.ifBlank { old[i].right },
-                            down = e.down.ifBlank { old[i].down }
+                            center = e.center,
+                            left = e.left,
+                            up = e.up,
+                            right = e.right,
+                            down = e.down,
+                            upLeft = e.upLeft,
+                            upRight = e.upRight,
+                            downLeft = e.downLeft,
+                            downRight = e.downRight
                         )
                     }
                     KeyMapStore.saveSymbolKeys(context, newKeys)
@@ -263,6 +312,38 @@ private fun KeyEditCard(
             SmallField("右", right, onRight, Modifier.weight(1f))
             SmallField("下", down, onDown, Modifier.weight(1f))
             Text("", modifier = Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun DiagonalEditCard(
+    index: Int,
+    zoneName: String,
+    upLeft: String,
+    upRight: String,
+    downLeft: String,
+    downRight: String,
+    onUpLeft: (String) -> Unit,
+    onUpRight: (String) -> Unit,
+    onDownLeft: (String) -> Unit,
+    onDownRight: (String) -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color.White)
+            .padding(10.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text("键 $index ($zoneName)")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            SmallField("左上", upLeft, onUpLeft, Modifier.weight(1f))
+            SmallField("右上", upRight, onUpRight, Modifier.weight(1f))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            SmallField("左下", downLeft, onDownLeft, Modifier.weight(1f))
+            SmallField("右下", downRight, onDownRight, Modifier.weight(1f))
         }
     }
 }

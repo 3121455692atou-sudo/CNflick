@@ -53,6 +53,10 @@ private fun SetupScreen() {
         Text(text = "1. 点击“启用输入法”进入系统设置，打开 CNflick")
         Text(text = "2. 回来后点击“切换输入法”选择 CNflick")
         Text(text = "3. 在任意输入框测试：先滑声母，再滑韵母，点候选上屏")
+        Text(text = "使用小技巧：")
+        Text(text = "• 删除键长按可连删，长按时上滑可一键清空当前输入")
+        Text(text = "• 拼音/符号八方向可以分别开关：拼音默认关，符号默认开")
+        Text(text = "• 想用斜向滑动：先开八方向，再到映射页三级菜单配置斜向映射")
 
         OutlinedTextField(
             value = text.value,

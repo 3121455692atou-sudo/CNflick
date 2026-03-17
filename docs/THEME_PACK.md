@@ -6,19 +6,45 @@
 
 推荐使用 `zip` 文件，后缀建议为 `.cnflick-theme.zip`。
 
-目录结构：
+一键主题包（推荐）目录结构：
 
 ```text
-my-theme.cnflick-theme.zip
-├── theme.json
-├── preview.png
+my-pack.cnflick-theme.zip
+├── theme-pack.json          # 一键包清单（必需）
+├── theme.json               # 主题颜色（必需）
+├── preview.png              # 预览图（可选）
 └── assets/
-    └── optional-background.png
+    ├── font.ttf             # 可选
+    ├── ime_background.png   # 可选
+    ├── key_background.png   # 可选
+    └── key_sound.wav        # 可选
 ```
 
-- `theme.json`：必需，主题元数据与样式参数。
-- `preview.png`：建议，主题预览图（建议 1080x2400）。
-- `assets/`：可选，放扩展资源。
+`theme-pack.json` 字段（固定格式）：
+
+```json
+{
+  "packId": "demo.pink.template",
+  "packName": "粉色主题包模板",
+  "version": "1.0.0",
+  "themeId": "cnflick.theme.pink_template",
+  "assets": {
+    "font": "assets/font.ttf",
+    "imeBackground": "assets/ime_background.png",
+    "keyBackground": "assets/key_background.png",
+    "keySound": "assets/key_sound.wav"
+  }
+}
+```
+
+说明：
+- `packId`/`packName`/`version` 为必填。
+- `themeId` 推荐与 `theme.json.id` 一致。
+- `assets.*` 均为可选，缺失时自动回退默认（背景/按键图）或关闭自定义音效。
+- 资源路径必须是 zip 内相对路径，不能包含 `..`。
+
+兼容旧格式：
+- 仅包含 `theme.json` 的 zip 仍可通过“仅导入主题色（兼容旧格式）”导入。
 
 ## 2. theme.json 字段规范
 
@@ -106,3 +132,13 @@ zip -r my-theme.cnflick-theme.zip theme.json preview.png assets
 - 不认识的字段会被忽略，已识别字段才会生效。
 - 建议保留向后兼容：旧字段不要直接删除，优先新增字段。
 - v1.1 起支持背景图/按键图导入后的自动裁切与可选列表持久化。
+
+## 6. 预设主题包
+
+应用内置了两个可一键切换的预设主题包：
+
+- `纯默认主题包`：默认浅色 + 系统字体 + 默认背景/按键图。
+- `初音主题包`：初音主题色 + 初音背景 + JetBrains Mono 字体。
+
+这两个预设会和你导入的主题包一起出现在“可切换主题包（预设 + 已导入）”列表中。
+

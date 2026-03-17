@@ -63,7 +63,11 @@ class FlickImeService : InputMethodService() {
         val left: String,
         val up: String,
         val right: String,
-        val down: String
+        val down: String,
+        val upLeft: String = "",
+        val upRight: String = "",
+        val downLeft: String = "",
+        val downRight: String = ""
     )
     private data class CandidateEntry(
         val text: String,
@@ -90,6 +94,10 @@ class FlickImeService : InputMethodService() {
     private var keyBgAlpha: Float = 0.85f
     private var keySizeScale: Float = 1f
     private var keyGapDp: Float = 4f
+    private var enableEightDirectionPinyinFlick: Boolean = false
+    private var enableEightDirectionSymbolFlick: Boolean = true
+    private var showCenterKeyText: Boolean = true
+    private var showSideKeyText: Boolean = true
     private lateinit var clipboardManager: ClipboardManager
     private lateinit var audioManager: AudioManager
     private var vibrator: Vibrator? = null
@@ -125,6 +133,10 @@ class FlickImeService : InputMethodService() {
     private lateinit var hintUp: TextView
     private lateinit var hintRight: TextView
     private lateinit var hintDown: TextView
+    private lateinit var hintUpLeft: TextView
+    private lateinit var hintUpRight: TextView
+    private lateinit var hintDownLeft: TextView
+    private lateinit var hintDownRight: TextView
 
     private var colWidth = 0
     private var rowHeight = 0
@@ -242,11 +254,19 @@ class FlickImeService : InputMethodService() {
         hintUp = makeHintBubble("", false)
         hintRight = makeHintBubble("", false)
         hintDown = makeHintBubble("", false)
+        hintUpLeft = makeHintBubble("", false)
+        hintUpRight = makeHintBubble("", false)
+        hintDownLeft = makeHintBubble("", false)
+        hintDownRight = makeHintBubble("", false)
         rootOverlay.addView(hintCenter)
         rootOverlay.addView(hintLeft)
         rootOverlay.addView(hintUp)
         rootOverlay.addView(hintRight)
         rootOverlay.addView(hintDown)
+        rootOverlay.addView(hintUpLeft)
+        rootOverlay.addView(hintUpRight)
+        rootOverlay.addView(hintDownLeft)
+        rootOverlay.addView(hintDownRight)
         hideHintOverlay()
 
         root.addView(content)
@@ -394,7 +414,7 @@ class FlickImeService : InputMethodService() {
             listOf(
                 modeSwitchKey("ABC", Mode.ALPHA),
                 pinyinFlickKey(keys[3]), pinyinFlickKey(keys[4]), pinyinFlickKey(keys[5]),
-                controlKey("空格") { onSpacePressed() }
+                spaceKey()
             ),
             listOf(
                 modeSwitchKey("拼音", Mode.FLICK),
@@ -426,7 +446,7 @@ class FlickImeService : InputMethodService() {
 
         val rows = listOf(
             listOf(modeSwitchKey("☆123", Mode.NUM), groupedFlickKey("ABC", abc), groupedFlickKey("DEF", def), groupedFlickKey("GHI", ghi), backspaceKey()),
-            listOf(modeSwitchKey("ABC", Mode.ALPHA), groupedFlickKey("JKL", jkl), groupedFlickKey("MNO", mno), groupedFlickKey("PQR", pqr), controlKey("空格") { onSpacePressed() }),
+            listOf(modeSwitchKey("ABC", Mode.ALPHA), groupedFlickKey("JKL", jkl), groupedFlickKey("MNO", mno), groupedFlickKey("PQR", pqr), spaceKey()),
             listOf(modeSwitchKey("拼音", Mode.FLICK), groupedFlickKey("STU", stu), groupedFlickKey("VWX", vwx), groupedFlickKey("YZ'", yzq), primaryKey("回车") { sendEnter() }),
             listOf(modeSwitchKey("符号", Mode.SYMBOL), inputKey(","), controlKey(if (alphaCapsLock) "大写锁定开" else "大写锁定关") { toggleAlphaCaps() }, inputKey("."), modeSwitchKey("功能", Mode.FUNC))
         )
@@ -436,7 +456,7 @@ class FlickImeService : InputMethodService() {
     private fun buildNumPanel(): View {
         val rows = listOf(
             listOf(modeSwitchKey("☆123", Mode.NUM), inputKey("1"), inputKey("2"), inputKey("3"), backspaceKey()),
-            listOf(modeSwitchKey("ABC", Mode.ALPHA), inputKey("4"), inputKey("5"), inputKey("6"), controlKey("空格") { onSpacePressed() }),
+            listOf(modeSwitchKey("ABC", Mode.ALPHA), inputKey("4"), inputKey("5"), inputKey("6"), spaceKey()),
             listOf(modeSwitchKey("拼音", Mode.FLICK), inputKey("7"), inputKey("8"), inputKey("9"), primaryKey("回车") { sendEnter() }),
             listOf(modeSwitchKey("符号", Mode.SYMBOL), inputKey("("), inputKey("0"), inputKey(")"), modeSwitchKey("功能", Mode.FUNC))
         )
@@ -445,12 +465,12 @@ class FlickImeService : InputMethodService() {
 
     private fun buildSymbolPanel(): View {
         val specs = KeyMapStore.loadSymbolKeys(this).map {
-            DirectionalSpec(it.center, it.left, it.up, it.right, it.down)
+            DirectionalSpec(it.center, it.left, it.up, it.right, it.down, it.upLeft, it.upRight, it.downLeft, it.downRight)
         }
 
         val rows = listOf(
             listOf(modeSwitchKey("☆123", Mode.NUM), symbolFlickKey(specs[0]), symbolFlickKey(specs[1]), symbolFlickKey(specs[2]), backspaceKey()),
-            listOf(modeSwitchKey("ABC", Mode.ALPHA), symbolFlickKey(specs[3]), symbolFlickKey(specs[4]), symbolFlickKey(specs[5]), controlKey("空格") { onSpacePressed() }),
+            listOf(modeSwitchKey("ABC", Mode.ALPHA), symbolFlickKey(specs[3]), symbolFlickKey(specs[4]), symbolFlickKey(specs[5]), spaceKey()),
             listOf(modeSwitchKey("拼音", Mode.FLICK), symbolFlickKey(specs[6]), symbolFlickKey(specs[7]), symbolFlickKey(specs[8]), primaryKey("回车") { sendEnter() }),
             listOf(modeSwitchKey("符号", Mode.SYMBOL), symbolFlickKey(specs[9]), symbolFlickKey(specs[10]), symbolFlickKey(specs[11]), modeSwitchKey("功能", Mode.FUNC))
         )
@@ -460,7 +480,7 @@ class FlickImeService : InputMethodService() {
     private fun buildFunctionPanel(): View {
         val rows = listOf(
             listOf(modeSwitchKey("☆123", Mode.NUM), controlKey("复制") { copySelection() }, controlKey("↑") { sendArrow(KeyEvent.KEYCODE_DPAD_UP) }, controlKey("粘贴") { pasteClipboard() }, backspaceKey()),
-            listOf(modeSwitchKey("ABC", Mode.ALPHA), controlKey("←") { sendArrow(KeyEvent.KEYCODE_DPAD_LEFT) }, controlKey("●") {}, controlKey("→") { sendArrow(KeyEvent.KEYCODE_DPAD_RIGHT) }, controlKey("空格") { onSpacePressed() }),
+            listOf(modeSwitchKey("ABC", Mode.ALPHA), controlKey("←") { sendArrow(KeyEvent.KEYCODE_DPAD_LEFT) }, controlKey("●") {}, controlKey("→") { sendArrow(KeyEvent.KEYCODE_DPAD_RIGHT) }, spaceKey()),
             listOf(modeSwitchKey("拼音", Mode.FLICK), controlKey("剪切") { cutSelection() }, controlKey("↓") { sendArrow(KeyEvent.KEYCODE_DPAD_DOWN) }, controlKey("全选") { selectAll() }, primaryKey("回车") { sendEnter() }),
             listOf(modeSwitchKey("符号", Mode.SYMBOL), controlKey("HOME") { sendKey(KeyEvent.KEYCODE_MOVE_HOME) }, controlKey("剪贴板") { showClipboardPanel() }, controlKey("END") { sendKey(KeyEvent.KEYCODE_MOVE_END) }, modeSwitchKey("功能", Mode.FUNC))
         )
@@ -624,7 +644,12 @@ class FlickImeService : InputMethodService() {
             gravity = Gravity.CENTER_HORIZONTAL
         }
 
-        val globe = iconAction("🌐") { switchInputMethodQuick() }
+        val globeMode = UiPrefs.getGlobeKeyMode(this)
+        val globe = when (globeMode) {
+            UiPrefs.GLOBE_KEY_MODE_HIDDEN -> spacerCell()
+            UiPrefs.GLOBE_KEY_MODE_DISABLED -> iconAction("🌐", enabled = false) {}
+            else -> iconAction("🌐") { switchInputMethodQuick() }
+        }
         val collapse = iconAction("⌄") { hideImeWindow() }
         val settings = iconAction("⚙") { openImeSettings() }
         val spacer1 = spacerCell()
@@ -644,7 +669,7 @@ class FlickImeService : InputMethodService() {
         }
     }
 
-    private fun iconAction(icon: String, onClick: () -> Unit): View {
+    private fun iconAction(icon: String, enabled: Boolean = true, onClick: () -> Unit): View {
         return TextView(this).apply {
             text = icon
             textSize = 27f
@@ -653,7 +678,14 @@ class FlickImeService : InputMethodService() {
             gravity = Gravity.CENTER
             background = null
             setTextColor(colorKeyText())
-            setOnClickListener { playKeyClick(); onClick() }
+            alpha = if (enabled) 1f else 0.4f
+            isEnabled = enabled
+            isClickable = enabled
+            if (enabled) {
+                setOnClickListener { playKeyClick(); onClick() }
+            } else {
+                setOnClickListener(null)
+            }
         }
     }
 
@@ -683,66 +715,23 @@ class FlickImeService : InputMethodService() {
         val centerSize = if (isLandscape) centerTextSp - 2f else centerTextSp
         val sideSize = if (isLandscape) sideTextSp - 1f else sideTextSp
         val verticalEdgeMargin = if (isLandscape) dp(1) else dp(3)
+        val allowDiagonal = enableEightDirectionPinyinFlick
         val visual = DirectionalSpec(
             spec.center.lowercase(),
             spec.left.lowercase(),
             spec.up.lowercase(),
             spec.right.lowercase(),
-            spec.down.lowercase()
+            spec.down.lowercase(),
+            spec.upLeft.lowercase(),
+            spec.upRight.lowercase(),
+            spec.downLeft.lowercase(),
+            spec.downRight.lowercase()
         )
         val key = FrameLayout(this).apply {
             background = keyBackground(colorKeyBackground(), colorKeyBorder())
             isClickable = true
         }
-        key.addView(TextView(this).apply {
-            text = visual.center
-            textSize = centerSize
-            includeFontPadding = false
-            setTypeface(activeTypeface, Typeface.BOLD)
-            setTextColor(colorKeyText())
-            gravity = Gravity.CENTER
-            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
-        })
-        key.addView(TextView(this).apply {
-            text = visual.left
-            textSize = sideSize
-            includeFontPadding = false
-            setTypeface(activeTypeface, Typeface.NORMAL)
-            setTextColor(colorSubKeyText())
-            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.START or Gravity.CENTER_VERTICAL).apply {
-                marginStart = dp(4)
-            }
-        })
-        key.addView(TextView(this).apply {
-            text = visual.up
-            textSize = sideSize
-            includeFontPadding = false
-            setTypeface(activeTypeface, Typeface.NORMAL)
-            setTextColor(colorSubKeyText())
-            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
-                topMargin = verticalEdgeMargin
-            }
-        })
-        key.addView(TextView(this).apply {
-            text = visual.right
-            textSize = sideSize
-            includeFontPadding = false
-            setTypeface(activeTypeface, Typeface.NORMAL)
-            setTextColor(colorSubKeyText())
-            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.END or Gravity.CENTER_VERTICAL).apply {
-                marginEnd = dp(4)
-            }
-        })
-        key.addView(TextView(this).apply {
-            text = visual.down
-            textSize = sideSize
-            includeFontPadding = false
-            setTypeface(activeTypeface, Typeface.NORMAL)
-            setTextColor(colorSubKeyText())
-            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
-                bottomMargin = verticalEdgeMargin
-            }
-        })
+        addDirectionalLabels(key, visual, centerSize, sideSize, verticalEdgeMargin, allowDiagonal)
 
         var startX = 0f
         var startY = 0f
@@ -753,23 +742,18 @@ class FlickImeService : InputMethodService() {
                     startX = e.x
                     startY = e.y
                     direction = FlickDirection.Center
-                    showHintOverlay(visual, v, direction, true)
+                    showHintOverlay(visual, v, direction, allowVertical = true, allowDiagonal = allowDiagonal)
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    direction = detectDirection(e.x - startX, e.y - startY, true)
-                    showHintOverlay(visual, v, direction, true)
+                    direction = detectDirection(e.x - startX, e.y - startY, allowVertical = true, allowDiagonal = allowDiagonal)
+                    showHintOverlay(visual, v, direction, allowVertical = true, allowDiagonal = allowDiagonal)
                     true
                 }
                 MotionEvent.ACTION_UP -> {
                     hideHintOverlay()
-                    val out = when (direction) {
-                        FlickDirection.Center -> visual.center
-                        FlickDirection.Left -> visual.left
-                        FlickDirection.Up -> visual.up
-                        FlickDirection.Right -> visual.right
-                        FlickDirection.Down -> visual.down
-                    }
+                    val out = textByDirection(visual, direction)
+                    if (out.isBlank()) return@setOnTouchListener true
                     playKeyClick()
                     onPinyinFlick(spec.zone, out)
                     true
@@ -789,59 +773,12 @@ class FlickImeService : InputMethodService() {
         val centerSize = if (isLandscape) centerTextSp - 2f else centerTextSp
         val sideSize = if (isLandscape) sideTextSp - 1f else sideTextSp
         val verticalEdgeMargin = if (isLandscape) dp(1) else dp(3)
+        val allowDiagonal = enableEightDirectionSymbolFlick
         val key = FrameLayout(this).apply {
             background = keyBackground(colorKeyBackground(), colorKeyBorder())
             isClickable = true
         }
-        key.addView(TextView(this).apply {
-            text = spec.center
-            textSize = centerSize
-            includeFontPadding = false
-            setTypeface(activeTypeface, Typeface.BOLD)
-            setTextColor(colorKeyText())
-            gravity = Gravity.CENTER
-            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.CENTER)
-        })
-        key.addView(TextView(this).apply {
-            text = spec.left
-            textSize = sideSize
-            includeFontPadding = false
-            setTypeface(activeTypeface, Typeface.NORMAL)
-            setTextColor(colorSubKeyText())
-            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.START or Gravity.CENTER_VERTICAL).apply {
-                marginStart = dp(4)
-            }
-        })
-        key.addView(TextView(this).apply {
-            text = spec.up
-            textSize = sideSize
-            includeFontPadding = false
-            setTypeface(activeTypeface, Typeface.NORMAL)
-            setTextColor(colorSubKeyText())
-            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP or Gravity.CENTER_HORIZONTAL).apply {
-                topMargin = verticalEdgeMargin
-            }
-        })
-        key.addView(TextView(this).apply {
-            text = spec.right
-            textSize = sideSize
-            includeFontPadding = false
-            setTypeface(activeTypeface, Typeface.NORMAL)
-            setTextColor(colorSubKeyText())
-            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.END or Gravity.CENTER_VERTICAL).apply {
-                marginEnd = dp(4)
-            }
-        })
-        key.addView(TextView(this).apply {
-            text = spec.down
-            textSize = sideSize
-            includeFontPadding = false
-            setTypeface(activeTypeface, Typeface.NORMAL)
-            setTextColor(colorSubKeyText())
-            layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
-                bottomMargin = verticalEdgeMargin
-            }
-        })
+        addDirectionalLabels(key, spec, centerSize, sideSize, verticalEdgeMargin, allowDiagonal)
 
         var startX = 0f
         var startY = 0f
@@ -852,23 +789,18 @@ class FlickImeService : InputMethodService() {
                     startX = e.x
                     startY = e.y
                     direction = FlickDirection.Center
-                    showHintOverlay(spec, v, direction, true)
+                    showHintOverlay(spec, v, direction, allowVertical = true, allowDiagonal = allowDiagonal)
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    direction = detectDirection(e.x - startX, e.y - startY, true)
-                    showHintOverlay(spec, v, direction, true)
+                    direction = detectDirection(e.x - startX, e.y - startY, allowVertical = true, allowDiagonal = allowDiagonal)
+                    showHintOverlay(spec, v, direction, allowVertical = true, allowDiagonal = allowDiagonal)
                     true
                 }
                 MotionEvent.ACTION_UP -> {
                     hideHintOverlay()
-                    val out = when (direction) {
-                        FlickDirection.Center -> spec.center
-                        FlickDirection.Left -> spec.left
-                        FlickDirection.Up -> spec.up
-                        FlickDirection.Right -> spec.right
-                        FlickDirection.Down -> spec.down
-                    }
+                    val out = textByDirection(spec, direction)
+                    if (out.isBlank()) return@setOnTouchListener true
                     playKeyClick()
                     commitTextSafe(out)
                     true
@@ -886,11 +818,12 @@ class FlickImeService : InputMethodService() {
     private fun textFlickKey(spec: DirectionalSpec): View = directionalKey(spec) { commitTextSafe(it) }
 
     private fun groupedFlickKey(label: String, spec: DirectionalSpec): View =
-        directionalKey(spec, allowVertical = false, keyLabel = label) { commitAlphaChar(it) }
+        directionalKey(spec, allowVertical = false, allowDiagonal = false, keyLabel = label) { commitAlphaChar(it) }
 
     private fun directionalKey(
         spec: DirectionalSpec,
         allowVertical: Boolean = true,
+        allowDiagonal: Boolean = false,
         keyLabel: String = spec.center,
         commit: (String) -> Unit
     ): View {
@@ -912,23 +845,18 @@ class FlickImeService : InputMethodService() {
                     startX = e.x
                     startY = e.y
                     direction = FlickDirection.Center
-                    showHintOverlay(spec, v, direction, allowVertical)
+                    showHintOverlay(spec, v, direction, allowVertical, allowDiagonal)
                     true
                 }
                 MotionEvent.ACTION_MOVE -> {
-                    direction = detectDirection(e.x - startX, e.y - startY, allowVertical)
-                    showHintOverlay(spec, v, direction, allowVertical)
+                    direction = detectDirection(e.x - startX, e.y - startY, allowVertical, allowDiagonal)
+                    showHintOverlay(spec, v, direction, allowVertical, allowDiagonal)
                     true
                 }
                 MotionEvent.ACTION_UP -> {
                     hideHintOverlay()
-                    val out = when (direction) {
-                        FlickDirection.Center -> spec.center
-                        FlickDirection.Left -> spec.left
-                        FlickDirection.Up -> spec.up
-                        FlickDirection.Right -> spec.right
-                        FlickDirection.Down -> spec.down
-                    }
+                    val out = textByDirection(spec, direction)
+                    if (out.isBlank()) return@setOnTouchListener true
                     playKeyClick()
                     commit(out)
                     true
@@ -941,6 +869,153 @@ class FlickImeService : InputMethodService() {
             }
         }
         return key
+    }
+
+    private fun addDirectionalLabels(
+        key: FrameLayout,
+        spec: DirectionalSpec,
+        centerSize: Float,
+        sideSize: Float,
+        verticalEdgeMargin: Int,
+        allowDiagonal: Boolean
+    ) {
+        if (showCenterKeyText) {
+            key.addView(TextView(this).apply {
+                text = spec.center
+                textSize = centerSize
+                includeFontPadding = false
+                setTypeface(activeTypeface, Typeface.BOLD)
+                setTextColor(colorKeyText())
+                gravity = Gravity.CENTER
+                layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    Gravity.CENTER
+                )
+            })
+        }
+        if (!showSideKeyText) return
+
+        key.addView(TextView(this).apply {
+            text = spec.left
+            textSize = sideSize
+            includeFontPadding = false
+            setTypeface(activeTypeface, Typeface.NORMAL)
+            setTextColor(colorSubKeyText())
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.START or Gravity.CENTER_VERTICAL
+            ).apply { marginStart = dp(4) }
+        })
+        key.addView(TextView(this).apply {
+            text = spec.up
+            textSize = sideSize
+            includeFontPadding = false
+            setTypeface(activeTypeface, Typeface.NORMAL)
+            setTextColor(colorSubKeyText())
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.TOP or Gravity.CENTER_HORIZONTAL
+            ).apply { topMargin = verticalEdgeMargin }
+        })
+        key.addView(TextView(this).apply {
+            text = spec.right
+            textSize = sideSize
+            includeFontPadding = false
+            setTypeface(activeTypeface, Typeface.NORMAL)
+            setTextColor(colorSubKeyText())
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.END or Gravity.CENTER_VERTICAL
+            ).apply { marginEnd = dp(4) }
+        })
+        key.addView(TextView(this).apply {
+            text = spec.down
+            textSize = sideSize
+            includeFontPadding = false
+            setTypeface(activeTypeface, Typeface.NORMAL)
+            setTextColor(colorSubKeyText())
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL
+            ).apply { bottomMargin = verticalEdgeMargin }
+        })
+
+        if (!allowDiagonal) return
+
+        val diagonalSize = (sideSize - 1f).coerceAtLeast(8f)
+        if (spec.upLeft.isNotBlank()) {
+            key.addView(TextView(this).apply {
+                text = spec.upLeft
+                textSize = diagonalSize
+                includeFontPadding = false
+                setTypeface(activeTypeface, Typeface.NORMAL)
+                setTextColor(colorSubKeyText())
+                layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    Gravity.TOP or Gravity.START
+                ).apply {
+                    topMargin = verticalEdgeMargin
+                    marginStart = dp(4)
+                }
+            })
+        }
+        if (spec.upRight.isNotBlank()) {
+            key.addView(TextView(this).apply {
+                text = spec.upRight
+                textSize = diagonalSize
+                includeFontPadding = false
+                setTypeface(activeTypeface, Typeface.NORMAL)
+                setTextColor(colorSubKeyText())
+                layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    Gravity.TOP or Gravity.END
+                ).apply {
+                    topMargin = verticalEdgeMargin
+                    marginEnd = dp(4)
+                }
+            })
+        }
+        if (spec.downLeft.isNotBlank()) {
+            key.addView(TextView(this).apply {
+                text = spec.downLeft
+                textSize = diagonalSize
+                includeFontPadding = false
+                setTypeface(activeTypeface, Typeface.NORMAL)
+                setTextColor(colorSubKeyText())
+                layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    Gravity.BOTTOM or Gravity.START
+                ).apply {
+                    bottomMargin = verticalEdgeMargin
+                    marginStart = dp(4)
+                }
+            })
+        }
+        if (spec.downRight.isNotBlank()) {
+            key.addView(TextView(this).apply {
+                text = spec.downRight
+                textSize = diagonalSize
+                includeFontPadding = false
+                setTypeface(activeTypeface, Typeface.NORMAL)
+                setTextColor(colorSubKeyText())
+                layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    Gravity.BOTTOM or Gravity.END
+                ).apply {
+                    bottomMargin = verticalEdgeMargin
+                    marginEnd = dp(4)
+                }
+            })
+        }
     }
 
     private fun centeredLabelKey(
@@ -977,6 +1052,13 @@ class FlickImeService : InputMethodService() {
             key.background = keyBackground(colorKeyBackground(), colorKeyBorder())
         }
         key.setOnClickListener { playKeyClick(); onClick() }
+        return key
+    }
+
+    private fun spaceKey(): View {
+        val (key, _) = centeredLabelKey("空格", 14f, Typeface.NORMAL, colorKeyText())
+        key.background = keyBackground(colorKeyBackground(), colorKeyBorder())
+        key.setOnClickListener { playKeyClick(); onSpacePressed() }
         return key
     }
 
@@ -1103,24 +1185,50 @@ class FlickImeService : InputMethodService() {
     }
 
     private fun makeHintBubble(text: String, center: Boolean): TextView {
+        val baseBg = if (center) colorAccentKeyBackground() else colorKeyText()
         return TextView(this).apply {
             this.text = text
             gravity = Gravity.CENTER
             textSize = if (center) 19f else 17f
             setTypeface(activeTypeface, Typeface.BOLD)
-            setTextColor(colorAccentKeyText())
+            setTextColor(readableTextColor(baseBg))
             background = GradientDrawable().apply {
                 shape = GradientDrawable.RECTANGLE
                 cornerRadius = dp(16).toFloat()
-                setColor(if (center) colorAccentKeyBackground() else colorKeyText())
-                setStroke(dp(2), colorAccentKeyText())
+                setColor(baseBg)
+                setStroke(dp(2), withCustomAlpha(readableTextColor(baseBg), 0.7f))
             }
             layoutParams = FrameLayout.LayoutParams(dp(58), dp(44))
             elevation = dp(60).toFloat()
         }
     }
 
-    private fun showHintOverlay(spec: DirectionalSpec, key: View, direction: FlickDirection, allowVertical: Boolean) {
+    private fun textByDirection(spec: DirectionalSpec, direction: FlickDirection): String {
+        return when (direction) {
+            FlickDirection.Center -> spec.center
+            FlickDirection.Left -> spec.left
+            FlickDirection.Up -> spec.up
+            FlickDirection.Right -> spec.right
+            FlickDirection.Down -> spec.down
+            FlickDirection.UpLeft -> spec.upLeft
+            FlickDirection.UpRight -> spec.upRight
+            FlickDirection.DownLeft -> spec.downLeft
+            FlickDirection.DownRight -> spec.downRight
+        }
+    }
+
+    private fun showHintOverlay(
+        spec: DirectionalSpec,
+        key: View,
+        direction: FlickDirection,
+        allowVertical: Boolean,
+        allowDiagonal: Boolean = false
+    ) {
+        if (!UiPrefs.getShowFlickHintOverlay(this)) {
+            hideHintOverlay()
+            return
+        }
+
         val keyPos = IntArray(2)
         val rootPos = IntArray(2)
         key.getLocationOnScreen(keyPos)
@@ -1137,23 +1245,43 @@ class FlickImeService : InputMethodService() {
         hintUp.text = if (allowVertical) spec.up else ""
         hintRight.text = spec.right
         hintDown.text = if (allowVertical) spec.down else ""
+        hintUpLeft.text = if (allowVertical && allowDiagonal) spec.upLeft else ""
+        hintUpRight.text = if (allowVertical && allowDiagonal) spec.upRight else ""
+        hintDownLeft.text = if (allowVertical && allowDiagonal) spec.downLeft else ""
+        hintDownRight.text = if (allowVertical && allowDiagonal) spec.downRight else ""
 
         placeHint(hintCenter, cx, cy, maxW, maxH)
         placeHint(hintLeft, cx - dist, cy, maxW, maxH)
         if (allowVertical) placeHint(hintUp, cx, cy - dist, maxW, maxH)
         placeHint(hintRight, cx + dist, cy, maxW, maxH)
         if (allowVertical) placeHint(hintDown, cx, cy + dist, maxW, maxH)
+        if (allowVertical && allowDiagonal) {
+            placeHint(hintUpLeft, cx - dist, cy - dist, maxW, maxH)
+            placeHint(hintUpRight, cx + dist, cy - dist, maxW, maxH)
+            placeHint(hintDownLeft, cx - dist, cy + dist, maxW, maxH)
+            placeHint(hintDownRight, cx + dist, cy + dist, maxW, maxH)
+        }
 
         highlightHint(hintLeft, direction == FlickDirection.Left)
         if (allowVertical) highlightHint(hintUp, direction == FlickDirection.Up)
         highlightHint(hintRight, direction == FlickDirection.Right)
         if (allowVertical) highlightHint(hintDown, direction == FlickDirection.Down)
+        if (allowVertical && allowDiagonal) {
+            highlightHint(hintUpLeft, direction == FlickDirection.UpLeft)
+            highlightHint(hintUpRight, direction == FlickDirection.UpRight)
+            highlightHint(hintDownLeft, direction == FlickDirection.DownLeft)
+            highlightHint(hintDownRight, direction == FlickDirection.DownRight)
+        }
 
         hintCenter.visibility = View.VISIBLE
         hintLeft.visibility = View.VISIBLE
         hintUp.visibility = if (allowVertical) View.VISIBLE else View.GONE
         hintRight.visibility = View.VISIBLE
         hintDown.visibility = if (allowVertical) View.VISIBLE else View.GONE
+        hintUpLeft.visibility = if (allowVertical && allowDiagonal && spec.upLeft.isNotBlank()) View.VISIBLE else View.GONE
+        hintUpRight.visibility = if (allowVertical && allowDiagonal && spec.upRight.isNotBlank()) View.VISIBLE else View.GONE
+        hintDownLeft.visibility = if (allowVertical && allowDiagonal && spec.downLeft.isNotBlank()) View.VISIBLE else View.GONE
+        hintDownRight.visibility = if (allowVertical && allowDiagonal && spec.downRight.isNotBlank()) View.VISIBLE else View.GONE
         rootOverlay.bringToFront()
     }
 
@@ -1169,8 +1297,10 @@ class FlickImeService : InputMethodService() {
     }
 
     private fun highlightHint(v: TextView, selected: Boolean) {
+        val color = if (selected) colorSelectedItemBackground() else colorKeyText()
         val bg = v.background as GradientDrawable
-        bg.setColor(if (selected) colorSelectedItemBackground() else colorKeyText())
+        bg.setColor(color)
+        v.setTextColor(readableTextColor(color))
     }
 
     private fun hideHintOverlay() {
@@ -1179,14 +1309,37 @@ class FlickImeService : InputMethodService() {
         hintUp.visibility = View.GONE
         hintRight.visibility = View.GONE
         hintDown.visibility = View.GONE
+        hintUpLeft.visibility = View.GONE
+        hintUpRight.visibility = View.GONE
+        hintDownLeft.visibility = View.GONE
+        hintDownRight.visibility = View.GONE
     }
 
-    private fun detectDirection(dx: Float, dy: Float, allowVertical: Boolean): FlickDirection {
+    private fun detectDirection(
+        dx: Float,
+        dy: Float,
+        allowVertical: Boolean,
+        allowDiagonal: Boolean = false
+    ): FlickDirection {
         val threshold = dp(14).toFloat()
         if (abs(dx) < threshold && abs(dy) < threshold) return FlickDirection.Center
         if (!allowVertical) {
             return if (dx > threshold) FlickDirection.Right else if (dx < -threshold) FlickDirection.Left else FlickDirection.Center
         }
+
+        if (allowDiagonal && abs(dx) >= threshold && abs(dy) >= threshold) {
+            val major = maxOf(abs(dx), abs(dy))
+            val minor = minOf(abs(dx), abs(dy))
+            if (minor / major >= 0.5f) {
+                return when {
+                    dx < 0 && dy < 0 -> FlickDirection.UpLeft
+                    dx > 0 && dy < 0 -> FlickDirection.UpRight
+                    dx < 0 && dy > 0 -> FlickDirection.DownLeft
+                    else -> FlickDirection.DownRight
+                }
+            }
+        }
+
         return if (abs(dx) >= abs(dy)) {
             if (dx > 0) FlickDirection.Right else FlickDirection.Left
         } else {
@@ -1736,6 +1889,11 @@ class FlickImeService : InputMethodService() {
         return Color.rgb(nr, ng, nb)
     }
 
+    private fun readableTextColor(background: Int): Int {
+        val luminance = (Color.red(background) * 299 + Color.green(background) * 587 + Color.blue(background) * 114) / 1000
+        return if (luminance >= 160) Color.BLACK else Color.WHITE
+    }
+
     private fun commitAlphaChar(ch: String) {
         if (ch.length == 1 && ch[0].isLetter()) {
             val out = if (alphaCapsLock) ch.uppercase() else ch.lowercase()
@@ -1766,6 +1924,10 @@ class FlickImeService : InputMethodService() {
         keyBgAlpha = UiPrefs.getKeyBgAlpha(this)
         keySizeScale = UiPrefs.getKeySizeScale(this).coerceIn(0.75f, 1.25f)
         keyGapDp = UiPrefs.getKeyGapDp(this).coerceIn(0f, 14f)
+        enableEightDirectionPinyinFlick = UiPrefs.getEnableEightDirectionPinyin(this)
+        enableEightDirectionSymbolFlick = UiPrefs.getEnableEightDirectionSymbol(this)
+        showCenterKeyText = UiPrefs.getShowCenterKeyText(this)
+        showSideKeyText = UiPrefs.getShowSideKeyText(this)
         keyboardBgImage = loadBitmap(UiPrefs.getImeBgImagePath(this))
         keyBgImage = loadBitmap(UiPrefs.getKeyBgImagePath(this))
         reloadCustomSound()
@@ -1804,11 +1966,10 @@ class FlickImeService : InputMethodService() {
     private fun colorKeyboardBackground(): Int = colorOrDefault(keyboardTheme.colors.keyboardBackground, "#AEB7C5")
     private fun colorPanelBackground(): Int = colorOrDefault(keyboardTheme.colors.panelBackground, "#BBC4D2")
     private fun resolvedPanelBackground(): Int {
-        val base = colorPanelBackground()
-        return if (keyboardBgImage == null) base else withCustomAlpha(base, 0.08f)
+        return if (hasImageBackgroundForUi()) Color.TRANSPARENT else colorPanelBackground()
     }
     private fun resolvedCandidatePanelBackground(): Int {
-        return if (hasImageBackgroundForUi()) Color.TRANSPARENT else resolvedPanelBackground()
+        return resolvedPanelBackground()
     }
     private fun hasImageBackgroundForUi(): Boolean {
         if (keyboardBgImage != null || keyBgImage != null) return true

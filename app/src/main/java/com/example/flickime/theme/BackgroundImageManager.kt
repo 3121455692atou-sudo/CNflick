@@ -69,6 +69,53 @@ object BackgroundImageManager {
             .apply()
     }
 
+
+    fun selectDefaultImeBackground(context: Context) {
+        selectImeBackground(context, IME_SOLID_ID)
+    }
+
+    fun selectDefaultKeyBackground(context: Context) {
+        selectKeyBackground(context, KEY_SOLID_ID)
+    }
+
+    fun registerImeBackgroundFile(
+        context: Context,
+        id: String,
+        name: String,
+        filePath: String
+    ): BackgroundOption {
+        ensureInitialized(context)
+        val file = File(filePath)
+        require(file.exists() && file.isFile) { "输入法背景图文件不存在" }
+        val option = BackgroundOption(
+            id = id,
+            name = name.ifBlank { "主题包输入法背景" },
+            path = file.absolutePath,
+            builtIn = false
+        )
+        saveImportedOption(context, KEY_IME_BG_OPTIONS, option)
+        return option
+    }
+
+    fun registerKeyBackgroundFile(
+        context: Context,
+        id: String,
+        name: String,
+        filePath: String
+    ): BackgroundOption {
+        ensureInitialized(context)
+        val file = File(filePath)
+        require(file.exists() && file.isFile) { "按键图文件不存在" }
+        val option = BackgroundOption(
+            id = id,
+            name = name.ifBlank { "主题包按键图" },
+            path = file.absolutePath,
+            builtIn = false
+        )
+        saveImportedOption(context, KEY_KEY_BG_OPTIONS, option)
+        return option
+    }
+
     fun importImeBackground(context: Context, uri: Uri): BackgroundOption {
         ensureInitialized(context)
         val option = importAndRegister(

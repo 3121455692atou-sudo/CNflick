@@ -61,6 +61,10 @@ fun FlickKeyButton(
                                 FlickDirection.Up -> spec.up
                                 FlickDirection.Right -> spec.right
                                 FlickDirection.Down -> spec.down
+                                FlickDirection.UpLeft -> spec.upLeft
+                                FlickDirection.UpRight -> spec.upRight
+                                FlickDirection.DownLeft -> spec.downLeft
+                                FlickDirection.DownRight -> spec.downRight
                             }
                         )
                     }

@@ -35,6 +35,7 @@ import androidx.compose.ui.unit.sp
 import com.example.flickime.theme.BackgroundImageManager
 import com.example.flickime.theme.FontManager
 import com.example.flickime.theme.ThemeManager
+import com.example.flickime.theme.ThemePackManager
 import com.example.flickime.theme.UiPrefs
 import java.io.File
 
@@ -75,12 +76,41 @@ private fun ImeSettingsScreen() {
     var keySizeScale by remember { mutableStateOf(UiPrefs.getKeySizeScale(context)) }
     var keyGapDp by remember { mutableStateOf(UiPrefs.getKeyGapDp(context)) }
     var useCustomSound by remember { mutableStateOf(UiPrefs.getUseCustomSound(context)) }
+    var showFlickHintOverlay by remember { mutableStateOf(UiPrefs.getShowFlickHintOverlay(context)) }
+    var enableEightDirectionPinyin by remember { mutableStateOf(UiPrefs.getEnableEightDirectionPinyin(context)) }
+    var enableEightDirectionSymbol by remember { mutableStateOf(UiPrefs.getEnableEightDirectionSymbol(context)) }
+    var showCenterKeyText by remember { mutableStateOf(UiPrefs.getShowCenterKeyText(context)) }
+    var showSideKeyText by remember { mutableStateOf(UiPrefs.getShowSideKeyText(context)) }
+    var globeKeyMode by remember { mutableStateOf(UiPrefs.getGlobeKeyMode(context)) }
+    var importedThemePacks by remember { mutableStateOf(ThemePackManager.getAvailablePacks(context)) }
+    var currentThemePackId by remember { mutableStateOf(ThemePackManager.getCurrentPackId(context)) }
 
     fun refreshBgOptions() {
         imeBgOptions = BackgroundImageManager.getImeOptions(context)
         keyBgOptions = BackgroundImageManager.getKeyOptions(context)
         selectedImeBgId = BackgroundImageManager.getSelectedImeId(context)
         selectedKeyBgId = BackgroundImageManager.getSelectedKeyId(context)
+    }
+
+    fun refreshThemePackState() {
+        allThemes = ThemeManager.getAllThemes(context)
+        currentThemeId = ThemeManager.getCurrentTheme(context).id
+        allFonts = FontManager.getAllFonts(context)
+        currentFontId = FontManager.getCurrentFontId(context)
+        useCustomSound = UiPrefs.getUseCustomSound(context)
+        showFlickHintOverlay = UiPrefs.getShowFlickHintOverlay(context)
+        enableEightDirectionPinyin = UiPrefs.getEnableEightDirectionPinyin(context)
+        enableEightDirectionSymbol = UiPrefs.getEnableEightDirectionSymbol(context)
+        showCenterKeyText = UiPrefs.getShowCenterKeyText(context)
+        showSideKeyText = UiPrefs.getShowSideKeyText(context)
+        refreshBgOptions()
+        importedThemePacks = ThemePackManager.getAvailablePacks(context)
+        currentThemePackId = ThemePackManager.getCurrentPackId(context)
+    }
+
+    fun updateGlobeKeyMode(mode: String) {
+        globeKeyMode = mode
+        UiPrefs.setGlobeKeyMode(context, mode)
     }
 
     fun persistUri(uri: Uri) {
@@ -94,11 +124,22 @@ private fun ImeSettingsScreen() {
         if (uri == null) return@rememberLauncherForActivityResult
         runCatching { ThemeManager.importThemeZip(context, uri) }
             .onSuccess {
-                allThemes = ThemeManager.getAllThemes(context)
-                currentThemeId = it.id
+                ThemePackManager.clearCurrentPack(context)
+                refreshThemePackState()
                 Toast.makeText(context, "主题已导入并切换：${it.name}", Toast.LENGTH_SHORT).show()
             }
             .onFailure { Toast.makeText(context, "主题导入失败：${it.message}", Toast.LENGTH_SHORT).show() }
+    }
+
+    val themePackPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        persistUri(uri)
+        runCatching { ThemePackManager.importThemePack(context, uri) }
+            .onSuccess {
+                refreshThemePackState()
+                Toast.makeText(context, "主题包已导入并应用：${it.packName}", Toast.LENGTH_SHORT).show()
+            }
+            .onFailure { Toast.makeText(context, "主题包导入失败：${it.message}", Toast.LENGTH_SHORT).show() }
     }
 
     val fontPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
@@ -198,17 +239,49 @@ private fun ImeSettingsScreen() {
 
             SettingsPage.THEME -> {
                 Text("主题设置", fontSize = 22.sp)
-                Button(onClick = { themePicker.launch(arrayOf("application/zip", "*/*")) }, modifier = Modifier.fillMaxWidth()) { Text("导入主题包") }
+                Button(
+                    onClick = { themePackPicker.launch(arrayOf("application/zip", "*/*")) },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("一键导入主题包（含字体/背景/按键图/音效）") }
+                OutlinedButton(
+                    onClick = { themePicker.launch(arrayOf("application/zip", "*/*")) },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("仅导入主题色（兼容旧格式）") }
+
+                Text("主题色列表")
                 allThemes.forEach { theme ->
                     val label = if (theme.id == currentThemeId) "✓ ${theme.name}" else theme.name
                     OutlinedButton(onClick = {
                         ThemeManager.setCurrentTheme(context, theme.id)
-                        currentThemeId = theme.id
+                        ThemePackManager.clearCurrentPack(context)
+                        refreshThemePackState()
                     }, modifier = Modifier.fillMaxWidth()) { Text(label) }
                 }
+                Text("可切换主题包（预设 + 已导入）")
+                if (importedThemePacks.isEmpty()) {
+                    Text("暂无主题包", color = Color(0xFF64748B), fontSize = 13.sp)
+                } else {
+                    importedThemePacks.forEach { pack ->
+                        val label = if (pack.packId == currentThemePackId) {
+                            "✓ ${pack.packName} (${pack.version})"
+                        } else {
+                            "${pack.packName} (${pack.version})"
+                        }
+                        OutlinedButton(onClick = {
+                            runCatching { ThemePackManager.applyThemePack(context, pack.packId) }
+                                .onSuccess {
+                                    refreshThemePackState()
+                                    Toast.makeText(context, "已切换主题包：${it.packName}", Toast.LENGTH_SHORT).show()
+                                }
+                                .onFailure { Toast.makeText(context, "切换主题包失败：${it.message}", Toast.LENGTH_SHORT).show() }
+                        }, modifier = Modifier.fillMaxWidth()) { Text(label) }
+                    }
+                }
+
                 OutlinedButton(onClick = {
                     ThemeManager.setCurrentTheme(context, "cnflick.theme.default_light")
-                    currentThemeId = ThemeManager.getCurrentTheme(context).id
+                    ThemePackManager.clearCurrentPack(context)
+                    refreshThemePackState()
                     Toast.makeText(context, "主题已恢复默认", Toast.LENGTH_SHORT).show()
                 }, modifier = Modifier.fillMaxWidth()) { Text("恢复默认主题") }
                 OutlinedButton(onClick = { page = SettingsPage.ROOT }, modifier = Modifier.fillMaxWidth()) { Text("返回") }
@@ -256,6 +329,56 @@ private fun ImeSettingsScreen() {
                         selectedKeyBgId = BackgroundImageManager.getSelectedKeyId(context)
                     }, modifier = Modifier.fillMaxWidth()) { Text(label) }
                 }
+
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("滑行十字选字框")
+                    Switch(checked = showFlickHintOverlay, onCheckedChange = {
+                        showFlickHintOverlay = it
+                        UiPrefs.setShowFlickHintOverlay(context, it)
+                    })
+                }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("拼音八方向滑行输入（默认关闭）")
+                    Switch(checked = enableEightDirectionPinyin, onCheckedChange = {
+                        enableEightDirectionPinyin = it
+                        UiPrefs.setEnableEightDirectionPinyin(context, it)
+                    })
+                }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("符号八方向滑行输入（默认开启）")
+                    Switch(checked = enableEightDirectionSymbol, onCheckedChange = {
+                        enableEightDirectionSymbol = it
+                        UiPrefs.setEnableEightDirectionSymbol(context, it)
+                    })
+                }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("显示按键中间文字")
+                    Switch(checked = showCenterKeyText, onCheckedChange = {
+                        showCenterKeyText = it
+                        UiPrefs.setShowCenterKeyText(context, it)
+                    })
+                }
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("显示按键四周小字")
+                    Switch(checked = showSideKeyText, onCheckedChange = {
+                        showSideKeyText = it
+                        UiPrefs.setShowSideKeyText(context, it)
+                    })
+                }
+
+                Text("地球键防误触")
+                OutlinedButton(
+                    onClick = { updateGlobeKeyMode(UiPrefs.GLOBE_KEY_MODE_NORMAL) },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text(if (globeKeyMode == UiPrefs.GLOBE_KEY_MODE_NORMAL) "✓ 地球键正常（可切换输入法）" else "地球键正常（可切换输入法）") }
+                OutlinedButton(
+                    onClick = { updateGlobeKeyMode(UiPrefs.GLOBE_KEY_MODE_HIDDEN) },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text(if (globeKeyMode == UiPrefs.GLOBE_KEY_MODE_HIDDEN) "✓ 隐藏地球键" else "隐藏地球键") }
+                OutlinedButton(
+                    onClick = { updateGlobeKeyMode(UiPrefs.GLOBE_KEY_MODE_DISABLED) },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text(if (globeKeyMode == UiPrefs.GLOBE_KEY_MODE_DISABLED) "✓ 显示但禁用地球键" else "显示但禁用地球键") }
 
                 Text("中间字体大小: ${"%.1f".format(centerSp)}sp")
                 Slider(value = centerSp, onValueChange = {
@@ -310,6 +433,10 @@ private fun ImeSettingsScreen() {
                     keyBgAlpha = UiPrefs.getKeyBgAlpha(context)
                     keySizeScale = UiPrefs.getKeySizeScale(context)
                     keyGapDp = UiPrefs.getKeyGapDp(context)
+                    enableEightDirectionPinyin = UiPrefs.getEnableEightDirectionPinyin(context)
+                    enableEightDirectionSymbol = UiPrefs.getEnableEightDirectionSymbol(context)
+                    showCenterKeyText = UiPrefs.getShowCenterKeyText(context)
+                    showSideKeyText = UiPrefs.getShowSideKeyText(context)
                     Toast.makeText(context, "外观设置已恢复默认", Toast.LENGTH_SHORT).show()
                 }, modifier = Modifier.fillMaxWidth()) { Text("恢复默认外观") }
 
