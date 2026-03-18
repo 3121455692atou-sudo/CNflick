@@ -1,6 +1,12 @@
 # CNflick
 
 12 键 Flick 中文输入法。
+0重码率、低误触率的手机双拼方案！
+
+![qq_pic_merged_1773795801860](https://github.com/user-attachments/assets/3faffe11-10f6-44f1-b3f5-2d11c184c273)
+
+
+
 
 开发者：忧郁乔班尼  
 
@@ -27,10 +33,3 @@
 详细版本记录见 [docs/RELEASE.md](docs/RELEASE.md)。
 主题包制作规范见 [docs/THEME_PACK.md](docs/THEME_PACK.md)。
 
-## 编译（给二创作者）
-```bash
-./gradlew :app:assembleDebug
-```
-
-输出 APK：
-- `app/build/outputs/apk/debug/app-debug.apk`
