@@ -1,6 +1,7 @@
 package com.example.flickime.theme
 
 import android.content.Context
+import com.example.flickime.model.InputLanguage
 
 object UiPrefs {
     private const val PREFS = "flick_settings"
@@ -23,10 +24,17 @@ object UiPrefs {
     const val KEY_SHOW_CENTER_KEY_TEXT = "show_center_key_text"
     const val KEY_SHOW_SIDE_KEY_TEXT = "show_side_key_text"
     const val KEY_GLOBE_KEY_MODE = "globe_key_mode"
+    const val KEY_CURRENT_INPUT_LANGUAGE = "current_input_language"
+    const val KEY_ENABLED_INPUT_LANGUAGES = "enabled_input_languages"
+    const val KEY_GLOBE_LANGUAGE_SWITCH_ENABLED = "globe_language_switch_enabled"
 
     const val GLOBE_KEY_MODE_NORMAL = "normal"
     const val GLOBE_KEY_MODE_HIDDEN = "hidden"
     const val GLOBE_KEY_MODE_DISABLED = "disabled"
+
+    const val LANG_PINYIN = "pinyin"
+    const val LANG_ZHUYIN = "zhuyin"
+    const val LANG_JAPANESE = "japanese"
 
     const val MIKU_BG_ASSET = "asset://backgrounds/default_miku.jpg"
     private const val DEFAULT_CENTER_TEXT_SP = 18f
@@ -70,6 +78,37 @@ object UiPrefs {
 
     fun getShowCenterKeyText(context: Context): Boolean = prefs(context).getBoolean(KEY_SHOW_CENTER_KEY_TEXT, true)
     fun getShowSideKeyText(context: Context): Boolean = prefs(context).getBoolean(KEY_SHOW_SIDE_KEY_TEXT, true)
+    fun getGlobeLanguageSwitchEnabled(context: Context): Boolean {
+        return prefs(context).getBoolean(KEY_GLOBE_LANGUAGE_SWITCH_ENABLED, true)
+    }
+
+    fun setGlobeLanguageSwitchEnabled(context: Context, enabled: Boolean) {
+        prefs(context).edit().putBoolean(KEY_GLOBE_LANGUAGE_SWITCH_ENABLED, enabled).apply()
+    }
+
+    fun getCurrentInputLanguage(context: Context): InputLanguage {
+        val raw = prefs(context).getString(KEY_CURRENT_INPUT_LANGUAGE, LANG_PINYIN).orEmpty()
+        return InputLanguage.fromId(raw)
+    }
+
+    fun setCurrentInputLanguage(context: Context, language: InputLanguage) {
+        prefs(context).edit().putString(KEY_CURRENT_INPUT_LANGUAGE, language.id).apply()
+    }
+
+    fun getEnabledInputLanguages(context: Context): Set<InputLanguage> {
+        val defaults = setOf(LANG_PINYIN, LANG_ZHUYIN, LANG_JAPANESE)
+        val raw = prefs(context).getStringSet(KEY_ENABLED_INPUT_LANGUAGES, defaults).orEmpty()
+        val mapped = raw.map { InputLanguage.fromId(it) }.toMutableSet()
+        if (mapped.isEmpty()) mapped += InputLanguage.PINYIN
+        return mapped
+    }
+
+    fun setEnabledInputLanguages(context: Context, languages: Set<InputLanguage>) {
+        val safe = if (languages.isEmpty()) setOf(InputLanguage.PINYIN) else languages
+        prefs(context).edit()
+            .putStringSet(KEY_ENABLED_INPUT_LANGUAGES, safe.map { it.id }.toSet())
+            .apply()
+    }
 
     fun getGlobeKeyMode(context: Context): String {
         val raw = prefs(context).getString(KEY_GLOBE_KEY_MODE, GLOBE_KEY_MODE_NORMAL).orEmpty()
@@ -124,6 +163,9 @@ object UiPrefs {
             .putBoolean(KEY_ENABLE_EIGHT_DIRECTION_SYMBOL, true)
             .putBoolean(KEY_SHOW_CENTER_KEY_TEXT, true)
             .putBoolean(KEY_SHOW_SIDE_KEY_TEXT, true)
+            .putBoolean(KEY_GLOBE_LANGUAGE_SWITCH_ENABLED, true)
+            .putString(KEY_CURRENT_INPUT_LANGUAGE, LANG_PINYIN)
+            .putStringSet(KEY_ENABLED_INPUT_LANGUAGES, setOf(LANG_PINYIN, LANG_ZHUYIN, LANG_JAPANESE))
             .apply()
     }
 

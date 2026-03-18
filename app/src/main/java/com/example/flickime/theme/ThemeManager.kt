@@ -155,7 +155,8 @@ object ThemeManager {
 
     private fun parseThemeZip(file: File): KeyboardTheme {
         ZipFile(file).use { zip ->
-            val entry = zip.getEntry("theme.json") ?: error("主题包缺少 theme.json")
+            val entryPath = resolveThemeJsonEntryPath(zip)
+            val entry = zip.getEntry(entryPath) ?: error("主题包缺少 theme.json")
             val json = zip.getInputStream(entry).bufferedReader(Charsets.UTF_8).use { it.readText() }
             val root = JSONObject(json)
             val colors = root.optJSONObject("colors") ?: JSONObject()
@@ -180,6 +181,48 @@ object ThemeManager {
         }
     }
 
+    private fun resolveThemeJsonEntryPath(zip: ZipFile): String {
+        val all = zip.entries().asSequence()
+            .filter { !it.isDirectory }
+            .map { it.name }
+            .toList()
+        if (all.isEmpty()) error("主题包为空")
+
+        fun normalize(path: String): String {
+            return path.replace('\\', '/')
+                .removePrefix("./")
+                .trimStart('/')
+        }
+
+        fun fileName(path: String): String {
+            val n = normalize(path)
+            val idx = n.lastIndexOf('/')
+            return if (idx >= 0) n.substring(idx + 1) else n
+        }
+
+        val byLower = linkedMapOf<String, String>()
+        all.forEach { byLower[normalize(it).lowercase()] = it }
+
+        val exact = byLower["theme.json"]
+        if (exact != null) return exact
+
+        val basenameMatches = all.filter { fileName(it).equals("theme.json", ignoreCase = true) }
+        if (basenameMatches.isNotEmpty()) {
+            return basenameMatches.minByOrNull { normalize(it).length } ?: basenameMatches.first()
+        }
+
+        val themeJsonCandidates = all.filter {
+            val name = fileName(it).lowercase()
+            name.endsWith(".json") && name.contains("theme")
+        }
+        if (themeJsonCandidates.size == 1) return themeJsonCandidates.first()
+
+        val allJson = all.filter { fileName(it).lowercase().endsWith(".json") }
+        if (allJson.size == 1) return allJson.first()
+
+        error("主题包缺少 theme.json（可放在子目录，或使用包含 theme 的 JSON 文件名）")
+    }
+
     private fun loadImportedThemeJson(context: Context): JSONArray {
         val raw = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getString(KEY_IMPORTED_THEMES, "[]")
@@ -194,4 +237,3 @@ object ThemeManager {
             .apply()
     }
 }
-

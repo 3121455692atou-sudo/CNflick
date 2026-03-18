@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.flickime.engine.JapaneseLexiconManager
 import com.example.flickime.engine.LexiconManager
 import com.example.flickime.engine.ShortcutEntry
 import com.example.flickime.engine.ShortcutManager
@@ -42,20 +43,32 @@ class LexiconSettingsActivity : ComponentActivity() {
     }
 }
 
+private enum class LexiconSettingsPage { ROOT, CHINESE, JAPANESE }
+
 @Composable
 private fun LexiconSettingsScreen() {
     val context = LocalContext.current
 
+    var page by remember { mutableStateOf(LexiconSettingsPage.ROOT) }
+
     var allLexicons by remember { mutableStateOf(LexiconManager.getAllLexicons(context)) }
     var enabledIds by remember { mutableStateOf(LexiconManager.getEnabledLexiconIds(context)) }
+
+    var jpAllLexicons by remember { mutableStateOf(JapaneseLexiconManager.getAllLexicons(context)) }
+    var jpEnabledIds by remember { mutableStateOf(JapaneseLexiconManager.getEnabledLexiconIds(context)) }
 
     var shortcuts by remember { mutableStateOf(ShortcutManager.getAll(context)) }
     var shortcutCode by remember { mutableStateOf("") }
     var shortcutText by remember { mutableStateOf("") }
 
-    fun refreshLexicons() {
+    fun refreshChineseLexicons() {
         allLexicons = LexiconManager.getAllLexicons(context)
         enabledIds = LexiconManager.getEnabledLexiconIds(context)
+    }
+
+    fun refreshJapaneseLexicons() {
+        jpAllLexicons = JapaneseLexiconManager.getAllLexicons(context)
+        jpEnabledIds = JapaneseLexiconManager.getEnabledLexiconIds(context)
     }
 
     fun refreshShortcuts() {
@@ -66,11 +79,23 @@ private fun LexiconSettingsScreen() {
         if (uri == null) return@rememberLauncherForActivityResult
         runCatching { LexiconManager.importLexicon(context, uri) }
             .onSuccess {
-                refreshLexicons()
+                refreshChineseLexicons()
                 Toast.makeText(context, "词库已导入并启用", Toast.LENGTH_SHORT).show()
             }
             .onFailure {
                 Toast.makeText(context, "词库导入失败：${it.message}", Toast.LENGTH_SHORT).show()
+            }
+    }
+
+    val japaneseLexiconPicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        runCatching { JapaneseLexiconManager.importLexicon(context, uri) }
+            .onSuccess {
+                refreshJapaneseLexicons()
+                Toast.makeText(context, "日语词库已导入并启用", Toast.LENGTH_SHORT).show()
+            }
+            .onFailure {
+                Toast.makeText(context, "日语词库导入失败：${it.message}", Toast.LENGTH_SHORT).show()
             }
     }
 
@@ -82,90 +107,149 @@ private fun LexiconSettingsScreen() {
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        Text("词库管理", fontSize = 22.sp)
-        Text("可同时启用多个词库。默认已启用常用网络词 + 开源动漫词库。")
+        when (page) {
+            LexiconSettingsPage.ROOT -> {
+                Text("词库管理", fontSize = 22.sp)
+                Text("中文（拼音/注音）与日语词库分开配置。")
 
-        Button(onClick = { lexiconPicker.launch(arrayOf("application/json", "text/*", "*/*")) }, modifier = Modifier.fillMaxWidth()) {
-            Text("导入词库（JSON/TXT/TSV）")
-        }
+                Button(onClick = { page = LexiconSettingsPage.CHINESE }, modifier = Modifier.fillMaxWidth()) {
+                    Text("中文词库设置（拼音 + 注音共用）")
+                }
+                Button(onClick = { page = LexiconSettingsPage.JAPANESE }, modifier = Modifier.fillMaxWidth()) {
+                    Text("日语词库设置（假名单独）")
+                }
+                OutlinedButton(onClick = { (context as? Activity)?.finish() }, modifier = Modifier.fillMaxWidth()) {
+                    Text("返回")
+                }
+            }
 
-        allLexicons.forEach { lexicon ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color.White)
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                val label = if (lexicon.isBuiltIn) "${lexicon.name}（内置）" else lexicon.name
-                Text(label, modifier = Modifier.weight(1f))
-                Switch(
-                    checked = enabledIds.contains(lexicon.id),
-                    onCheckedChange = { checked ->
-                        LexiconManager.setLexiconEnabled(context, lexicon.id, checked)
-                        enabledIds = LexiconManager.getEnabledLexiconIds(context)
+            LexiconSettingsPage.CHINESE -> {
+                Text("中文词库管理", fontSize = 22.sp)
+                Text("拼音与注音共享中文词库。")
+
+                Button(onClick = { lexiconPicker.launch(arrayOf("application/json", "text/*", "*/*")) }, modifier = Modifier.fillMaxWidth()) {
+                    Text("导入词库（JSON/TXT/TSV）")
+                }
+
+                allLexicons.forEach { lexicon ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color.White)
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        val label = if (lexicon.isBuiltIn) "${lexicon.name}（内置）" else lexicon.name
+                        Text(label, modifier = Modifier.weight(1f))
+                        Switch(
+                            checked = enabledIds.contains(lexicon.id),
+                            onCheckedChange = { checked ->
+                                LexiconManager.setLexiconEnabled(context, lexicon.id, checked)
+                                enabledIds = LexiconManager.getEnabledLexiconIds(context)
+                            }
+                        )
                     }
-                )
-            }
-        }
+                }
 
-        OutlinedButton(onClick = {
-            LexiconManager.resetToDefault(context)
-            enabledIds = LexiconManager.getEnabledLexiconIds(context)
-            Toast.makeText(context, "词库开关已恢复默认", Toast.LENGTH_SHORT).show()
-        }, modifier = Modifier.fillMaxWidth()) { Text("恢复默认词库开关") }
-
-        Text("快捷词库", fontSize = 22.sp)
-        Text("示例：输入码 js -> 小学生。支持任意长度文本，可随时添加/删除。")
-
-        OutlinedTextField(
-            value = shortcutCode,
-            onValueChange = { shortcutCode = it },
-            label = { Text("输入码（例如 js）") },
-            singleLine = true,
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        OutlinedTextField(
-            value = shortcutText,
-            onValueChange = { shortcutText = it },
-            label = { Text("输出文本") },
-            modifier = Modifier.fillMaxWidth()
-        )
-
-        Button(onClick = {
-            val code = shortcutCode.trim()
-            val text = shortcutText.trim()
-            if (code.isBlank() || text.isBlank()) {
-                Toast.makeText(context, "请输入输入码和输出文本", Toast.LENGTH_SHORT).show()
-                return@Button
-            }
-            ShortcutManager.upsert(context, code, text)
-            shortcutCode = ""
-            shortcutText = ""
-            refreshShortcuts()
-            Toast.makeText(context, "快捷词条已添加", Toast.LENGTH_SHORT).show()
-        }, modifier = Modifier.fillMaxWidth()) {
-            Text("添加快捷词条")
-        }
-
-        shortcuts.forEach { entry: ShortcutEntry ->
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(Color.White)
-                    .padding(horizontal = 12.dp, vertical = 10.dp),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text("${entry.code} -> ${entry.text}", modifier = Modifier.weight(1f))
                 OutlinedButton(onClick = {
-                    ShortcutManager.remove(context, entry)
+                    LexiconManager.resetToDefault(context)
+                    enabledIds = LexiconManager.getEnabledLexiconIds(context)
+                    Toast.makeText(context, "词库开关已恢复默认", Toast.LENGTH_SHORT).show()
+                }, modifier = Modifier.fillMaxWidth()) { Text("恢复默认词库开关") }
+
+                Text("快捷词库", fontSize = 22.sp)
+                Text("示例：输入码 js -> 小学生。支持任意长度文本，可随时添加/删除。")
+
+                OutlinedTextField(
+                    value = shortcutCode,
+                    onValueChange = { shortcutCode = it },
+                    label = { Text("输入码（例如 js）") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = shortcutText,
+                    onValueChange = { shortcutText = it },
+                    label = { Text("输出文本") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Button(onClick = {
+                    val code = shortcutCode.trim()
+                    val text = shortcutText.trim()
+                    if (code.isBlank() || text.isBlank()) {
+                        Toast.makeText(context, "请输入输入码和输出文本", Toast.LENGTH_SHORT).show()
+                        return@Button
+                    }
+                    ShortcutManager.upsert(context, code, text)
+                    shortcutCode = ""
+                    shortcutText = ""
                     refreshShortcuts()
-                    Toast.makeText(context, "已删除快捷词条", Toast.LENGTH_SHORT).show()
-                }) { Text("删除") }
+                    Toast.makeText(context, "快捷词条已添加", Toast.LENGTH_SHORT).show()
+                }, modifier = Modifier.fillMaxWidth()) {
+                    Text("添加快捷词条")
+                }
+
+                shortcuts.forEach { entry: ShortcutEntry ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color.White)
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("${entry.code} -> ${entry.text}", modifier = Modifier.weight(1f))
+                        OutlinedButton(onClick = {
+                            ShortcutManager.remove(context, entry)
+                            refreshShortcuts()
+                            Toast.makeText(context, "已删除快捷词条", Toast.LENGTH_SHORT).show()
+                        }) { Text("删除") }
+                    }
+                }
+
+                OutlinedButton(onClick = { page = LexiconSettingsPage.ROOT }, modifier = Modifier.fillMaxWidth()) { Text("返回") }
+            }
+
+            LexiconSettingsPage.JAPANESE -> {
+                Text("日语词库管理", fontSize = 22.sp)
+                Text("日语假名输入使用独立词库。")
+
+                Button(
+                    onClick = { japaneseLexiconPicker.launch(arrayOf("application/json", "text/*", "*/*")) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("导入日语词库（JSON/TXT/TSV）")
+                }
+
+                jpAllLexicons.forEach { lexicon ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color.White)
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        val label = if (lexicon.isBuiltIn) "${lexicon.name}（内置）" else lexicon.name
+                        Text(label, modifier = Modifier.weight(1f))
+                        Switch(
+                            checked = jpEnabledIds.contains(lexicon.id),
+                            onCheckedChange = { checked ->
+                                JapaneseLexiconManager.setLexiconEnabled(context, lexicon.id, checked)
+                                jpEnabledIds = JapaneseLexiconManager.getEnabledLexiconIds(context)
+                            }
+                        )
+                    }
+                }
+
+                OutlinedButton(onClick = {
+                    JapaneseLexiconManager.resetToDefault(context)
+                    jpEnabledIds = JapaneseLexiconManager.getEnabledLexiconIds(context)
+                    Toast.makeText(context, "日语词库开关已恢复默认", Toast.LENGTH_SHORT).show()
+                }, modifier = Modifier.fillMaxWidth()) { Text("恢复默认日语词库开关") }
+
+                OutlinedButton(onClick = { page = LexiconSettingsPage.ROOT }, modifier = Modifier.fillMaxWidth()) { Text("返回") }
             }
         }
-
-        OutlinedButton(onClick = { (context as? Activity)?.finish() }, modifier = Modifier.fillMaxWidth()) { Text("返回") }
     }
 }

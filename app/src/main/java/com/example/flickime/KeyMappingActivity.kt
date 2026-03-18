@@ -31,7 +31,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.flickime.data.DefaultJapaneseKeyMap
+import com.example.flickime.data.DefaultKeyMap
 import com.example.flickime.data.DefaultSymbolMap
+import com.example.flickime.data.DefaultZhuyinKeyMap
 import com.example.flickime.data.KeyMapStore
 import com.example.flickime.model.DirectionalKeySpec
 import com.example.flickime.model.FlickKeySpec
@@ -45,7 +48,7 @@ class KeyMappingActivity : ComponentActivity() {
     }
 }
 
-private enum class MappingType { PINYIN, SYMBOL }
+private enum class MappingType { PINYIN, ZHUYIN, JAPANESE, SYMBOL }
 private enum class MappingMenuLevel { MAIN, DIAGONAL }
 
 private data class KeyEdit(
@@ -67,6 +70,8 @@ private fun KeyMappingScreen() {
     val mappingType = remember {
         when ((context as? KeyMappingActivity)?.intent?.getStringExtra("map_type")) {
             "symbol" -> MappingType.SYMBOL
+            "zhuyin" -> MappingType.ZHUYIN
+            "japanese" -> MappingType.JAPANESE
             else -> MappingType.PINYIN
         }
     }
@@ -74,6 +79,12 @@ private fun KeyMappingScreen() {
         when (mappingType) {
             MappingType.PINYIN -> KeyMapStore.loadPinyinKeys(context).map {
                 KeyEdit(it.center, it.left, it.up, it.right, it.down, it.upLeft, it.upRight, it.downLeft, it.downRight, it.zone.name)
+            }
+            MappingType.ZHUYIN -> KeyMapStore.loadZhuyinKeys(context).map {
+                KeyEdit(it.center, it.left, it.up, it.right, it.down, it.upLeft, it.upRight, it.downLeft, it.downRight, it.zone.name)
+            }
+            MappingType.JAPANESE -> KeyMapStore.loadJapaneseKeys(context).map {
+                KeyEdit(it.center, it.left, it.up, it.right, it.down, it.upLeft, it.upRight, it.downLeft, it.downRight, "Kana")
             }
             MappingType.SYMBOL -> KeyMapStore.loadSymbolKeys(context).map {
                 KeyEdit(it.center, it.left, it.up, it.right, it.down, it.upLeft, it.upRight, it.downLeft, it.downRight, "Symbol")
@@ -97,6 +108,10 @@ private fun KeyMappingScreen() {
                 val o = arr.getJSONObject(i)
                 val zone = if (mappingType == MappingType.PINYIN) {
                     if (i < 5) "Shengmu" else "Yunmu"
+                } else if (mappingType == MappingType.ZHUYIN) {
+                    if (i < 5) "Shengmu" else "Yunmu"
+                } else if (mappingType == MappingType.JAPANESE) {
+                    "Kana"
                 } else {
                     "Symbol"
                 }
@@ -156,7 +171,12 @@ private fun KeyMappingScreen() {
             .padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
     ) {
-        val title = if (mappingType == MappingType.PINYIN) "自定义拼音12键映射" else "自定义符号12键映射"
+        val title = when (mappingType) {
+            MappingType.PINYIN -> "自定义拼音12键映射"
+            MappingType.ZHUYIN -> "自定义注音12键映射"
+            MappingType.JAPANESE -> "自定义日语假名12键映射"
+            MappingType.SYMBOL -> "自定义符号12键映射"
+        }
         Text(title, fontSize = 22.sp)
         if (menuLevel == MappingMenuLevel.MAIN) {
             Text("二级菜单：正向映射（中/左/上/右/下）")
@@ -208,9 +228,17 @@ private fun KeyMappingScreen() {
             Button(onClick = {
                 edits.clear()
                 if (mappingType == MappingType.PINYIN) {
-                    val def = com.example.flickime.data.DefaultKeyMap.keys
+                    val def = DefaultKeyMap.keys
                     def.forEach {
                         edits.add(KeyEdit(it.center, it.left, it.up, it.right, it.down, it.upLeft, it.upRight, it.downLeft, it.downRight, it.zone.name))
+                    }
+                } else if (mappingType == MappingType.ZHUYIN) {
+                    DefaultZhuyinKeyMap.keys.forEach {
+                        edits.add(KeyEdit(it.center, it.left, it.up, it.right, it.down, it.upLeft, it.upRight, it.downLeft, it.downRight, it.zone.name))
+                    }
+                } else if (mappingType == MappingType.JAPANESE) {
+                    DefaultJapaneseKeyMap.keys.forEach {
+                        edits.add(KeyEdit(it.center, it.left, it.up, it.right, it.down, it.upLeft, it.upRight, it.downLeft, it.downRight, "Kana"))
                     }
                 } else {
                     val def = DefaultSymbolMap.keys
@@ -239,6 +267,40 @@ private fun KeyMappingScreen() {
                         )
                     }
                     KeyMapStore.savePinyinKeys(context, newKeys)
+                } else if (mappingType == MappingType.ZHUYIN) {
+                    val old = KeyMapStore.loadZhuyinKeys(context)
+                    val newKeys = edits.mapIndexed { i, e ->
+                        FlickKeySpec(
+                            center = e.center,
+                            left = e.left,
+                            up = e.up,
+                            right = e.right,
+                            down = e.down,
+                            upLeft = e.upLeft,
+                            upRight = e.upRight,
+                            downLeft = e.downLeft,
+                            downRight = e.downRight,
+                            zone = old[i].zone
+                        )
+                    }
+                    KeyMapStore.saveZhuyinKeys(context, newKeys)
+                } else if (mappingType == MappingType.JAPANESE) {
+                    val old = KeyMapStore.loadJapaneseKeys(context)
+                    val newKeys = edits.mapIndexed { i, e ->
+                        FlickKeySpec(
+                            center = e.center,
+                            left = e.left,
+                            up = e.up,
+                            right = e.right,
+                            down = e.down,
+                            upLeft = e.upLeft,
+                            upRight = e.upRight,
+                            downLeft = e.downLeft,
+                            downRight = e.downRight,
+                            zone = old[i].zone
+                        )
+                    }
+                    KeyMapStore.saveJapaneseKeys(context, newKeys)
                 } else {
                     val newKeys = edits.map { e ->
                         DirectionalKeySpec(
@@ -267,10 +329,11 @@ private fun KeyMappingScreen() {
             ) { Text("导入 JSON") }
             Button(
                 onClick = {
-                    val fileName = if (mappingType == MappingType.PINYIN) {
-                        "cnflick_pinyin_keymap.json"
-                    } else {
-                        "cnflick_symbol_keymap.json"
+                    val fileName = when (mappingType) {
+                        MappingType.PINYIN -> "cnflick_pinyin_keymap.json"
+                        MappingType.ZHUYIN -> "cnflick_zhuyin_keymap.json"
+                        MappingType.JAPANESE -> "cnflick_japanese_keymap.json"
+                        MappingType.SYMBOL -> "cnflick_symbol_keymap.json"
                     }
                     exportLauncher.launch(fileName)
                 },

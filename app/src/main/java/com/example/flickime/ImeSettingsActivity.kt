@@ -37,6 +37,7 @@ import com.example.flickime.theme.FontManager
 import com.example.flickime.theme.ThemeManager
 import com.example.flickime.theme.ThemePackManager
 import com.example.flickime.theme.UiPrefs
+import com.example.flickime.model.InputLanguage
 import java.io.File
 
 class ImeSettingsActivity : ComponentActivity() {
@@ -82,6 +83,8 @@ private fun ImeSettingsScreen() {
     var showCenterKeyText by remember { mutableStateOf(UiPrefs.getShowCenterKeyText(context)) }
     var showSideKeyText by remember { mutableStateOf(UiPrefs.getShowSideKeyText(context)) }
     var globeKeyMode by remember { mutableStateOf(UiPrefs.getGlobeKeyMode(context)) }
+    var globeLanguageSwitchEnabled by remember { mutableStateOf(UiPrefs.getGlobeLanguageSwitchEnabled(context)) }
+    var enabledInputLanguages by remember { mutableStateOf(UiPrefs.getEnabledInputLanguages(context)) }
     var importedThemePacks by remember { mutableStateOf(ThemePackManager.getAvailablePacks(context)) }
     var currentThemePackId by remember { mutableStateOf(ThemePackManager.getCurrentPackId(context)) }
 
@@ -103,6 +106,8 @@ private fun ImeSettingsScreen() {
         enableEightDirectionSymbol = UiPrefs.getEnableEightDirectionSymbol(context)
         showCenterKeyText = UiPrefs.getShowCenterKeyText(context)
         showSideKeyText = UiPrefs.getShowSideKeyText(context)
+        globeLanguageSwitchEnabled = UiPrefs.getGlobeLanguageSwitchEnabled(context)
+        enabledInputLanguages = UiPrefs.getEnabledInputLanguages(context)
         refreshBgOptions()
         importedThemePacks = ThemePackManager.getAvailablePacks(context)
         currentThemePackId = ThemePackManager.getCurrentPackId(context)
@@ -111,6 +116,24 @@ private fun ImeSettingsScreen() {
     fun updateGlobeKeyMode(mode: String) {
         globeKeyMode = mode
         UiPrefs.setGlobeKeyMode(context, mode)
+    }
+
+    fun updateLanguageEnabled(language: InputLanguage, enabled: Boolean) {
+        val next = enabledInputLanguages.toMutableSet()
+        if (enabled) {
+            next += language
+        } else {
+            if (next.size <= 1) {
+                Toast.makeText(context, "至少保留一种输入语言", Toast.LENGTH_SHORT).show()
+                return
+            }
+            next -= language
+        }
+        enabledInputLanguages = next
+        UiPrefs.setEnabledInputLanguages(context, next)
+        if (!next.contains(UiPrefs.getCurrentInputLanguage(context))) {
+            UiPrefs.setCurrentInputLanguage(context, next.first())
+        }
     }
 
     fun persistUri(uri: Uri) {
@@ -235,6 +258,28 @@ private fun ImeSettingsScreen() {
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) { Text("自定义符号映射") }
+
+                OutlinedButton(
+                    onClick = {
+                        context.startActivity(
+                            Intent(context, KeyMappingActivity::class.java)
+                                .putExtra("map_type", "zhuyin")
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("自定义注音映射") }
+
+                OutlinedButton(
+                    onClick = {
+                        context.startActivity(
+                            Intent(context, KeyMappingActivity::class.java)
+                                .putExtra("map_type", "japanese")
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("自定义日语假名映射") }
             }
 
             SettingsPage.THEME -> {
@@ -366,11 +411,54 @@ private fun ImeSettingsScreen() {
                     })
                 }
 
-                Text("地球键防误触")
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                    Text("地球键切换语言")
+                    Switch(checked = globeLanguageSwitchEnabled, onCheckedChange = {
+                        globeLanguageSwitchEnabled = it
+                        UiPrefs.setGlobeLanguageSwitchEnabled(context, it)
+                    })
+                }
+
+                Text("地球键可循环语言")
+                OutlinedButton(
+                    onClick = {
+                        updateLanguageEnabled(
+                            InputLanguage.PINYIN,
+                            !enabledInputLanguages.contains(InputLanguage.PINYIN)
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (enabledInputLanguages.contains(InputLanguage.PINYIN)) "✓ 拼音" else "拼音")
+                }
+                OutlinedButton(
+                    onClick = {
+                        updateLanguageEnabled(
+                            InputLanguage.ZHUYIN,
+                            !enabledInputLanguages.contains(InputLanguage.ZHUYIN)
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (enabledInputLanguages.contains(InputLanguage.ZHUYIN)) "✓ 注音" else "注音")
+                }
+                OutlinedButton(
+                    onClick = {
+                        updateLanguageEnabled(
+                            InputLanguage.JAPANESE,
+                            !enabledInputLanguages.contains(InputLanguage.JAPANESE)
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (enabledInputLanguages.contains(InputLanguage.JAPANESE)) "✓ 日语假名" else "日语假名")
+                }
+
+                Text("地球键显示模式")
                 OutlinedButton(
                     onClick = { updateGlobeKeyMode(UiPrefs.GLOBE_KEY_MODE_NORMAL) },
                     modifier = Modifier.fillMaxWidth()
-                ) { Text(if (globeKeyMode == UiPrefs.GLOBE_KEY_MODE_NORMAL) "✓ 地球键正常（可切换输入法）" else "地球键正常（可切换输入法）") }
+                ) { Text(if (globeKeyMode == UiPrefs.GLOBE_KEY_MODE_NORMAL) "✓ 地球键正常（可切换语言）" else "地球键正常（可切换语言）") }
                 OutlinedButton(
                     onClick = { updateGlobeKeyMode(UiPrefs.GLOBE_KEY_MODE_HIDDEN) },
                     modifier = Modifier.fillMaxWidth()
@@ -437,6 +525,8 @@ private fun ImeSettingsScreen() {
                     enableEightDirectionSymbol = UiPrefs.getEnableEightDirectionSymbol(context)
                     showCenterKeyText = UiPrefs.getShowCenterKeyText(context)
                     showSideKeyText = UiPrefs.getShowSideKeyText(context)
+                    globeLanguageSwitchEnabled = UiPrefs.getGlobeLanguageSwitchEnabled(context)
+                    enabledInputLanguages = UiPrefs.getEnabledInputLanguages(context)
                     Toast.makeText(context, "外观设置已恢复默认", Toast.LENGTH_SHORT).show()
                 }, modifier = Modifier.fillMaxWidth()) { Text("恢复默认外观") }
 

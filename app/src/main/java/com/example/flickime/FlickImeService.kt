@@ -37,12 +37,14 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
-import com.example.flickime.data.DefaultKeyMap
 import com.example.flickime.data.KeyMapStore
+import com.example.flickime.engine.JapaneseEngine
 import com.example.flickime.engine.LexiconManager
 import com.example.flickime.engine.PinyinEngine
+import com.example.flickime.engine.ZhuyinConverter
 import com.example.flickime.model.FlickDirection
 import com.example.flickime.model.FlickKeySpec
+import com.example.flickime.model.InputLanguage
 import com.example.flickime.model.KeyZone
 import com.example.flickime.theme.FontManager
 import com.example.flickime.theme.KeyboardTheme
@@ -80,6 +82,7 @@ class FlickImeService : InputMethodService() {
     )
 
     private lateinit var pinyinEngine: PinyinEngine
+    private lateinit var japaneseEngine: JapaneseEngine
     private val candidateExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val candidateToken = AtomicInteger(0)
@@ -106,6 +109,7 @@ class FlickImeService : InputMethodService() {
 
     private var shengmuPart: String? = null
     private val composedSyllables = mutableListOf<String>()
+    private val composedDisplaySyllables = mutableListOf<String>()
     private var composingText: String = ""
     private var allCandidates: List<CandidateEntry> = emptyList()
     private var composingSessionFullQuery: String = ""
@@ -146,6 +150,17 @@ class FlickImeService : InputMethodService() {
     private val clipboardHistory = mutableListOf<String>()
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener { captureSystemClipboard() }
     private val modeSwitchViews = mutableListOf<ModeSwitchEntry>()
+    private var currentInputLanguage: InputLanguage = InputLanguage.PINYIN
+    private var enabledInputLanguages: List<InputLanguage> = listOf(InputLanguage.PINYIN, InputLanguage.ZHUYIN, InputLanguage.JAPANESE)
+    private val japaneseModifierTokens = setOf("゛゜小", "小゛゜", "ﾞﾟ小", "小ﾞﾟ")
+    private val japaneseTransformCycles = listOf(
+        listOf("あ", "ぁ"), listOf("い", "ぃ"), listOf("う", "ぅ", "ゔ"), listOf("え", "ぇ"), listOf("お", "ぉ"),
+        listOf("や", "ゃ"), listOf("ゆ", "ゅ"), listOf("よ", "ょ"), listOf("わ", "ゎ"),
+        listOf("か", "が"), listOf("き", "ぎ"), listOf("く", "ぐ"), listOf("け", "げ"), listOf("こ", "ご"),
+        listOf("さ", "ざ"), listOf("し", "じ"), listOf("す", "ず"), listOf("せ", "ぜ"), listOf("そ", "ぞ"),
+        listOf("た", "だ"), listOf("ち", "ぢ"), listOf("つ", "っ", "づ"), listOf("て", "で"), listOf("と", "ど"),
+        listOf("は", "ば", "ぱ"), listOf("ひ", "び", "ぴ"), listOf("ふ", "ぶ", "ぷ"), listOf("へ", "べ", "ぺ"), listOf("ほ", "ぼ", "ぽ")
+    )
 
     private enum class Mode { FLICK, ALPHA, NUM, SYMBOL, CANDIDATE, FUNC, CLIPBOARD }
     private var mode: Mode = Mode.FLICK
@@ -153,11 +168,14 @@ class FlickImeService : InputMethodService() {
     override fun onCreate() {
         super.onCreate()
         pinyinEngine = PinyinEngine(this)
+        japaneseEngine = JapaneseEngine(this)
         candidateExecutor.execute {
             runCatching { LexiconManager.warmup(this) }
+            runCatching { com.example.flickime.engine.JapaneseLexiconManager.warmup(this) }
         }
         keyboardTheme = ThemeManager.getCurrentTheme(this)
         reloadCustomUiSettings()
+        loadLanguagePrefs()
         clipboardManager = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
         vibrator = try {
@@ -281,6 +299,7 @@ class FlickImeService : InputMethodService() {
         super.onStartInputView(info, restarting)
         keyboardTheme = ThemeManager.getCurrentTheme(this)
         reloadCustomUiSettings()
+        loadLanguagePrefs()
         updateRootBackground()
         rebuildPanelsFromSettings()
     }
@@ -289,6 +308,7 @@ class FlickImeService : InputMethodService() {
         super.onWindowShown()
         keyboardTheme = ThemeManager.getCurrentTheme(this)
         reloadCustomUiSettings()
+        loadLanguagePrefs()
         updateRootBackground()
         rebuildPanelsFromSettings()
         refreshCandidateViews()
@@ -350,7 +370,7 @@ class FlickImeService : InputMethodService() {
             setTextColor(colorHintText())
             maxLines = 1
             ellipsize = TextUtils.TruncateAt.END
-            text = "拼音"
+            text = languagePlaceholder()
         }
 
         val bottom = LinearLayout(this).apply {
@@ -404,7 +424,8 @@ class FlickImeService : InputMethodService() {
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
         }
 
-        val keys = KeyMapStore.loadPinyinKeys(this)
+        val keys = loadCurrentLanguageKeys()
+        val languageModeLabel = currentLanguageModeLabel()
         val rows = listOf(
             listOf(
                 modeSwitchKey("☆123", Mode.NUM),
@@ -417,7 +438,7 @@ class FlickImeService : InputMethodService() {
                 spaceKey()
             ),
             listOf(
-                modeSwitchKey("拼音", Mode.FLICK),
+                modeSwitchKey(languageModeLabel, Mode.FLICK),
                 pinyinFlickKey(keys[6]), pinyinFlickKey(keys[7]), pinyinFlickKey(keys[8]),
                 primaryKey("回车") { sendEnter() }
             ),
@@ -447,7 +468,7 @@ class FlickImeService : InputMethodService() {
         val rows = listOf(
             listOf(modeSwitchKey("☆123", Mode.NUM), groupedFlickKey("ABC", abc), groupedFlickKey("DEF", def), groupedFlickKey("GHI", ghi), backspaceKey()),
             listOf(modeSwitchKey("ABC", Mode.ALPHA), groupedFlickKey("JKL", jkl), groupedFlickKey("MNO", mno), groupedFlickKey("PQR", pqr), spaceKey()),
-            listOf(modeSwitchKey("拼音", Mode.FLICK), groupedFlickKey("STU", stu), groupedFlickKey("VWX", vwx), groupedFlickKey("YZ'", yzq), primaryKey("回车") { sendEnter() }),
+            listOf(modeSwitchKey(currentLanguageModeLabel(), Mode.FLICK), groupedFlickKey("STU", stu), groupedFlickKey("VWX", vwx), groupedFlickKey("YZ'", yzq), primaryKey("回车") { sendEnter() }),
             listOf(modeSwitchKey("符号", Mode.SYMBOL), inputKey(","), controlKey(if (alphaCapsLock) "大写锁定开" else "大写锁定关") { toggleAlphaCaps() }, inputKey("."), modeSwitchKey("功能", Mode.FUNC))
         )
         return panelFromRows(rows)
@@ -457,7 +478,7 @@ class FlickImeService : InputMethodService() {
         val rows = listOf(
             listOf(modeSwitchKey("☆123", Mode.NUM), inputKey("1"), inputKey("2"), inputKey("3"), backspaceKey()),
             listOf(modeSwitchKey("ABC", Mode.ALPHA), inputKey("4"), inputKey("5"), inputKey("6"), spaceKey()),
-            listOf(modeSwitchKey("拼音", Mode.FLICK), inputKey("7"), inputKey("8"), inputKey("9"), primaryKey("回车") { sendEnter() }),
+            listOf(modeSwitchKey(currentLanguageModeLabel(), Mode.FLICK), inputKey("7"), inputKey("8"), inputKey("9"), primaryKey("回车") { sendEnter() }),
             listOf(modeSwitchKey("符号", Mode.SYMBOL), inputKey("("), inputKey("0"), inputKey(")"), modeSwitchKey("功能", Mode.FUNC))
         )
         return panelFromRows(rows)
@@ -471,7 +492,7 @@ class FlickImeService : InputMethodService() {
         val rows = listOf(
             listOf(modeSwitchKey("☆123", Mode.NUM), symbolFlickKey(specs[0]), symbolFlickKey(specs[1]), symbolFlickKey(specs[2]), backspaceKey()),
             listOf(modeSwitchKey("ABC", Mode.ALPHA), symbolFlickKey(specs[3]), symbolFlickKey(specs[4]), symbolFlickKey(specs[5]), spaceKey()),
-            listOf(modeSwitchKey("拼音", Mode.FLICK), symbolFlickKey(specs[6]), symbolFlickKey(specs[7]), symbolFlickKey(specs[8]), primaryKey("回车") { sendEnter() }),
+            listOf(modeSwitchKey(currentLanguageModeLabel(), Mode.FLICK), symbolFlickKey(specs[6]), symbolFlickKey(specs[7]), symbolFlickKey(specs[8]), primaryKey("回车") { sendEnter() }),
             listOf(modeSwitchKey("符号", Mode.SYMBOL), symbolFlickKey(specs[9]), symbolFlickKey(specs[10]), symbolFlickKey(specs[11]), modeSwitchKey("功能", Mode.FUNC))
         )
         return panelFromRows(rows)
@@ -481,7 +502,7 @@ class FlickImeService : InputMethodService() {
         val rows = listOf(
             listOf(modeSwitchKey("☆123", Mode.NUM), controlKey("复制") { copySelection() }, controlKey("↑") { sendArrow(KeyEvent.KEYCODE_DPAD_UP) }, controlKey("粘贴") { pasteClipboard() }, backspaceKey()),
             listOf(modeSwitchKey("ABC", Mode.ALPHA), controlKey("←") { sendArrow(KeyEvent.KEYCODE_DPAD_LEFT) }, controlKey("●") {}, controlKey("→") { sendArrow(KeyEvent.KEYCODE_DPAD_RIGHT) }, spaceKey()),
-            listOf(modeSwitchKey("拼音", Mode.FLICK), controlKey("剪切") { cutSelection() }, controlKey("↓") { sendArrow(KeyEvent.KEYCODE_DPAD_DOWN) }, controlKey("全选") { selectAll() }, primaryKey("回车") { sendEnter() }),
+            listOf(modeSwitchKey(currentLanguageModeLabel(), Mode.FLICK), controlKey("剪切") { cutSelection() }, controlKey("↓") { sendArrow(KeyEvent.KEYCODE_DPAD_DOWN) }, controlKey("全选") { selectAll() }, primaryKey("回车") { sendEnter() }),
             listOf(modeSwitchKey("符号", Mode.SYMBOL), controlKey("HOME") { sendKey(KeyEvent.KEYCODE_MOVE_HOME) }, controlKey("剪贴板") { showClipboardPanel() }, controlKey("END") { sendKey(KeyEvent.KEYCODE_MOVE_END) }, modeSwitchKey("功能", Mode.FUNC))
         )
         return panelFromRows(rows)
@@ -648,7 +669,11 @@ class FlickImeService : InputMethodService() {
         val globe = when (globeMode) {
             UiPrefs.GLOBE_KEY_MODE_HIDDEN -> spacerCell()
             UiPrefs.GLOBE_KEY_MODE_DISABLED -> iconAction("🌐", enabled = false) {}
-            else -> iconAction("🌐") { switchInputMethodQuick() }
+            else -> {
+                val canSwitchLanguage = UiPrefs.getGlobeLanguageSwitchEnabled(this) && enabledInputLanguages.size > 1
+                if (canSwitchLanguage) iconAction("🌐") { switchLanguageQuick() }
+                else iconAction("🌐", enabled = false) {}
+            }
         }
         val collapse = iconAction("⌄") { hideImeWindow() }
         val settings = iconAction("⚙") { openImeSettings() }
@@ -1354,32 +1379,80 @@ class FlickImeService : InputMethodService() {
             return
         }
 
-        // 部分音节（如 ü/v）被放到声母区时，按韵母逻辑处理，允许首音节直接输入。
-        val actualZone = if (zone == KeyZone.Shengmu && isYunmuLikeToken(text)) {
-            KeyZone.Yunmu
-        } else {
-            zone
-        }
-
-        when (actualZone) {
-            KeyZone.Shengmu -> {
-                shengmuPart = text
-                composingText = buildComposingDisplay()
+        when (currentInputLanguage) {
+            InputLanguage.PINYIN -> {
+                handlePinyinFlick(zone, text)
+                requestCandidatesAsync()
+                refreshCandidateViews()
             }
+            InputLanguage.ZHUYIN -> {
+                handleZhuyinFlick(zone, text)
+                requestCandidatesAsync()
+                refreshCandidateViews()
+            }
+            InputLanguage.JAPANESE -> {
+                if (handleJapaneseFlick(text)) {
+                    requestCandidatesAsync()
+                    refreshCandidateViews()
+                }
+            }
+        }
+    }
+
+    private fun handlePinyinFlick(zone: KeyZone, text: String) {
+        // 部分音节（如 ü/v）被放到声母区时，按韵母逻辑处理，允许首音节直接输入。
+        val actualZone = if (zone == KeyZone.Shengmu && isYunmuLikeToken(text)) KeyZone.Yunmu else zone
+        when (actualZone) {
+            KeyZone.Shengmu -> shengmuPart = text
             KeyZone.Yunmu -> {
                 val full = (shengmuPart ?: "") + text
                 shengmuPart = null
                 composedSyllables += full.lowercase()
-                composingText = buildComposingDisplay()
+                composedDisplaySyllables += full
             }
         }
+        composingText = buildComposingDisplay()
+    }
 
-        requestCandidatesAsync()
-        refreshCandidateViews()
+    private fun handleZhuyinFlick(zone: KeyZone, text: String) {
+        val actualZone = when {
+            zone == KeyZone.Shengmu && isZhuyinYunmuLikeToken(text) -> KeyZone.Yunmu
+            zone == KeyZone.Yunmu && isZhuyinShengmuLikeToken(text) -> KeyZone.Shengmu
+            else -> zone
+        }
+        when (actualZone) {
+            KeyZone.Shengmu -> shengmuPart = ZhuyinConverter.normalize(text)
+            KeyZone.Yunmu -> {
+                val fullZhuyin = ZhuyinConverter.normalize((shengmuPart ?: "") + text)
+                shengmuPart = null
+                if (fullZhuyin.isNotBlank()) {
+                    composedDisplaySyllables += fullZhuyin
+                    composedSyllables += ZhuyinConverter.toPinyin(fullZhuyin).lowercase()
+                }
+            }
+        }
+        composingText = buildComposingDisplay()
+    }
+
+    private fun handleJapaneseFlick(text: String): Boolean {
+        if (japaneseModifierTokens.contains(text)) {
+            return applyJapaneseModifier()
+        }
+        shengmuPart = null
+        val hira = com.example.flickime.engine.JapaneseLexiconManager.normalizeReading(text)
+        if (hira.isBlank()) {
+            commitTextSafe(text)
+            resetComposing()
+            return false
+        }
+        composedSyllables += hira
+        composedDisplaySyllables += hira
+        composingText = buildComposingDisplay()
+        return true
     }
 
     private fun isPunctuationToken(text: String): Boolean {
-        return text in setOf("，", "。", "？", "！", ",", ".", "?", "!")
+        return text in setOf("，", "。", "？", "！", "、", "！", ",", ".", "?", "!")
     }
 
     private fun isYunmuLikeToken(text: String): Boolean {
@@ -1387,6 +1460,54 @@ class FlickImeService : InputMethodService() {
         val t = text.lowercase(Locale.getDefault())
             .replace("ü", "v")
         return t == "v" || t == "er" || t.firstOrNull() in listOf('a', 'e', 'i', 'o', 'u')
+    }
+
+    private fun isZhuyinYunmuLikeToken(text: String): Boolean {
+        val t = ZhuyinConverter.normalize(text)
+        if (t.isBlank()) return false
+        val finals = listOf("ㄚ", "ㄛ", "ㄜ", "ㄝ", "ㄞ", "ㄟ", "ㄠ", "ㄡ", "ㄢ", "ㄣ", "ㄤ", "ㄥ", "ㄦ", "ㄧ", "ㄨ", "ㄩ")
+        return finals.any { t.startsWith(it) } || t.length >= 2
+    }
+
+    private fun isZhuyinShengmuLikeToken(text: String): Boolean {
+        val t = ZhuyinConverter.normalize(text)
+        if (t.isBlank()) return false
+        val initials = setOf(
+            "ㄅ", "ㄆ", "ㄇ", "ㄈ",
+            "ㄉ", "ㄊ", "ㄋ", "ㄌ",
+            "ㄍ", "ㄎ", "ㄏ",
+            "ㄐ", "ㄑ", "ㄒ",
+            "ㄓ", "ㄔ", "ㄕ", "ㄖ",
+            "ㄗ", "ㄘ", "ㄙ"
+        )
+        return initials.contains(t)
+    }
+
+    private fun applyJapaneseModifier(): Boolean {
+        if (composedDisplaySyllables.isEmpty()) return false
+        val index = composedDisplaySyllables.lastIndex
+        val transformed = transformJapaneseKana(composedDisplaySyllables[index])
+        if (transformed == composedDisplaySyllables[index]) return false
+
+        composedDisplaySyllables[index] = transformed
+        val normalized = com.example.flickime.engine.JapaneseLexiconManager.normalizeReading(transformed)
+        if (normalized.isNotBlank()) {
+            composedSyllables[index] = normalized
+        } else {
+            composedSyllables[index] = transformed
+        }
+        composingText = buildComposingDisplay()
+        return true
+    }
+
+    private fun transformJapaneseKana(value: String): String {
+        if (value.length != 1) return value
+        val ch = value
+        japaneseTransformCycles.forEach { cycle ->
+            val idx = cycle.indexOf(ch)
+            if (idx >= 0) return cycle[(idx + 1) % cycle.size]
+        }
+        return value
     }
 
     private fun switchMode(target: Mode) {
@@ -1402,7 +1523,7 @@ class FlickImeService : InputMethodService() {
     }
 
     private fun refreshCandidateViews() {
-        composingView.text = if (composingText.isBlank()) "拼音" else composingText
+        composingView.text = if (composingText.isBlank()) languagePlaceholder() else composingText
         composingView.setTextColor(if (composingText.isBlank()) colorHintText() else colorAccentKeyBackground())
 
         candidateRow.removeAllViews()
@@ -1456,6 +1577,7 @@ class FlickImeService : InputMethodService() {
 
     private fun commitCandidate(candidate: CandidateEntry) {
         val current = composedSyllables.toList()
+        val currentDisplay = composedDisplaySyllables.toList()
         if (current.isEmpty()) {
             commitTextSafe(candidate.text)
             resetComposing()
@@ -1463,6 +1585,7 @@ class FlickImeService : InputMethodService() {
         }
         val consume = candidate.consumeSyllables.coerceIn(1, current.size)
         val remaining = current.drop(consume)
+        val remainingDisplay = currentDisplay.drop(consume)
         val fullQuery = if (composingSessionFullQuery.isBlank()) current.joinToString("") else composingSessionFullQuery
         val fullText = composingSessionCommittedText + candidate.text
 
@@ -1471,20 +1594,30 @@ class FlickImeService : InputMethodService() {
         if (remaining.isEmpty()) {
             if (fullQuery.isNotBlank() && fullText.isNotBlank()) {
                 candidateExecutor.execute {
-                    runCatching { pinyinEngine.recordUserChoice(fullQuery, fullText) }
+                    runCatching {
+                        if (currentInputLanguage == InputLanguage.JAPANESE) {
+                            japaneseEngine.recordUserChoice(fullQuery, fullText)
+                        } else {
+                            pinyinEngine.recordUserChoice(fullQuery, fullText)
+                        }
+                    }
                 }
             }
             resetComposing()
             return
         }
 
-        if (composingSessionFullQuery.isBlank()) {
+        if (currentInputLanguage != InputLanguage.JAPANESE && composingSessionFullQuery.isBlank()) {
             composingSessionFullQuery = current.joinToString("")
         }
-        composingSessionCommittedText += candidate.text
+        if (currentInputLanguage != InputLanguage.JAPANESE) {
+            composingSessionCommittedText += candidate.text
+        }
         shengmuPart = null
         composedSyllables.clear()
         composedSyllables.addAll(remaining)
+        composedDisplaySyllables.clear()
+        composedDisplaySyllables.addAll(remainingDisplay)
         composingText = buildComposingDisplay()
         requestCandidatesAsync()
         refreshCandidateViews()
@@ -1504,6 +1637,9 @@ class FlickImeService : InputMethodService() {
         }
         if (composedSyllables.isNotEmpty()) {
             composedSyllables.removeAt(composedSyllables.lastIndex)
+            if (composedDisplaySyllables.isNotEmpty()) {
+                composedDisplaySyllables.removeAt(composedDisplaySyllables.lastIndex)
+            }
             composingText = buildComposingDisplay()
             requestCandidatesAsync()
             refreshCandidateViews()
@@ -1522,14 +1658,16 @@ class FlickImeService : InputMethodService() {
             commitCandidate(allCandidates.first())
             return
         }
-        val raw = buildRawPinyinForCommit()
-        if (raw.isNotBlank()) {
-            val fullQuery = if (composingSessionFullQuery.isBlank()) raw else composingSessionFullQuery
-            val fullText = composingSessionCommittedText + raw
-            commitTextSafe(raw)
-            if (fullQuery.isNotBlank() && fullText.isNotBlank()) {
-                candidateExecutor.execute {
-                    runCatching { pinyinEngine.recordUserChoice(fullQuery, fullText) }
+        val rawDisplay = buildRawDisplayForCommit()
+        if (rawDisplay.isNotBlank()) {
+            commitTextSafe(rawDisplay)
+            if (currentInputLanguage == InputLanguage.PINYIN) {
+                val fullQuery = if (composingSessionFullQuery.isBlank()) buildRawQueryForCommit() else composingSessionFullQuery
+                val fullText = composingSessionCommittedText + rawDisplay
+                if (fullQuery.isNotBlank() && fullText.isNotBlank()) {
+                    candidateExecutor.execute {
+                        runCatching { pinyinEngine.recordUserChoice(fullQuery, fullText) }
+                    }
                 }
             }
             resetComposing()
@@ -1539,14 +1677,16 @@ class FlickImeService : InputMethodService() {
     }
 
     private fun sendEnter() {
-        val raw = buildRawPinyinForCommit()
-        if (raw.isNotBlank()) {
-            val fullQuery = if (composingSessionFullQuery.isBlank()) raw else composingSessionFullQuery
-            val fullText = composingSessionCommittedText + raw
-            commitTextSafe(raw)
-            if (fullQuery.isNotBlank() && fullText.isNotBlank()) {
-                candidateExecutor.execute {
-                    runCatching { pinyinEngine.recordUserChoice(fullQuery, fullText) }
+        val rawDisplay = buildRawDisplayForCommit()
+        if (rawDisplay.isNotBlank()) {
+            commitTextSafe(rawDisplay)
+            if (currentInputLanguage == InputLanguage.PINYIN) {
+                val fullQuery = if (composingSessionFullQuery.isBlank()) buildRawQueryForCommit() else composingSessionFullQuery
+                val fullText = composingSessionCommittedText + rawDisplay
+                if (fullQuery.isNotBlank() && fullText.isNotBlank()) {
+                    candidateExecutor.execute {
+                        runCatching { pinyinEngine.recordUserChoice(fullQuery, fullText) }
+                    }
                 }
             }
             resetComposing()
@@ -1678,6 +1818,56 @@ class FlickImeService : InputMethodService() {
         }
     }
 
+    private fun loadLanguagePrefs() {
+        val enabled = UiPrefs.getEnabledInputLanguages(this).ifEmpty { setOf(InputLanguage.PINYIN) }
+        enabledInputLanguages = listOf(InputLanguage.PINYIN, InputLanguage.ZHUYIN, InputLanguage.JAPANESE)
+            .filter { enabled.contains(it) }
+            .ifEmpty { listOf(InputLanguage.PINYIN) }
+        val current = UiPrefs.getCurrentInputLanguage(this)
+        currentInputLanguage = if (enabledInputLanguages.contains(current)) current else enabledInputLanguages.first()
+        if (currentInputLanguage != current) {
+            UiPrefs.setCurrentInputLanguage(this, currentInputLanguage)
+        }
+    }
+
+    private fun loadCurrentLanguageKeys(): List<FlickKeySpec> {
+        return when (currentInputLanguage) {
+            InputLanguage.PINYIN -> KeyMapStore.loadPinyinKeys(this)
+            InputLanguage.ZHUYIN -> KeyMapStore.loadZhuyinKeys(this)
+            InputLanguage.JAPANESE -> KeyMapStore.loadJapaneseKeys(this)
+        }
+    }
+
+    private fun currentLanguageModeLabel(): String {
+        return when (currentInputLanguage) {
+            InputLanguage.PINYIN -> "拼音"
+            InputLanguage.ZHUYIN -> "注音"
+            InputLanguage.JAPANESE -> "かな"
+        }
+    }
+
+    private fun languagePlaceholder(): String {
+        return when (currentInputLanguage) {
+            InputLanguage.PINYIN -> "拼音"
+            InputLanguage.ZHUYIN -> "注音"
+            InputLanguage.JAPANESE -> "かな"
+        }
+    }
+
+    private fun switchLanguageQuick() {
+        loadLanguagePrefs()
+        if (enabledInputLanguages.size <= 1) return
+        val idx = enabledInputLanguages.indexOf(currentInputLanguage).coerceAtLeast(0)
+        val next = enabledInputLanguages[(idx + 1) % enabledInputLanguages.size]
+        if (next == currentInputLanguage) return
+        currentInputLanguage = next
+        UiPrefs.setCurrentInputLanguage(this, next)
+        resetComposing()
+        mode = Mode.FLICK
+        rebuildPanelsFromSettings()
+        refreshCandidateViews()
+    }
+
     private fun switchInputMethodQuick() {
         playKeyClick()
         try {
@@ -1725,6 +1915,7 @@ class FlickImeService : InputMethodService() {
         candidateToken.incrementAndGet()
         shengmuPart = null
         composedSyllables.clear()
+        composedDisplaySyllables.clear()
         composingText = ""
         allCandidates = emptyList()
         composingSessionFullQuery = ""
@@ -1735,14 +1926,84 @@ class FlickImeService : InputMethodService() {
     private fun computeCandidates(query: String, syllables: List<String>): List<CandidateEntry> {
         if (query.isBlank()) return emptyList()
         return try {
-            if (syllables.size <= 1) {
-                pinyinEngine.queryCandidates(query, 48).map { CandidateEntry(it, 1) }
-            } else {
-                computeMultiSyllableCandidates(syllables)
+            when (currentInputLanguage) {
+                InputLanguage.JAPANESE -> computeJapaneseCandidates(syllables)
+                else -> {
+                    if (syllables.size <= 1) {
+                        pinyinEngine.queryCandidates(query, 48).map { CandidateEntry(it, 1) }
+                    } else {
+                        computeMultiSyllableCandidates(syllables)
+                    }
+                }
             }
         } catch (_: Throwable) {
             emptyList()
         }
+    }
+
+    private fun computeJapaneseCandidates(syllables: List<String>): List<CandidateEntry> {
+        val size = syllables.size
+        if (size <= 0) return emptyList()
+        val out = ArrayList<CandidateEntry>(64)
+
+        fun addCandidate(text: String, consume: Int) {
+            if (text.isBlank()) return
+            val normalizedConsume = consume.coerceIn(1, size)
+            if (out.none { it.text == text && it.consumeSyllables == normalizedConsume }) {
+                out += CandidateEntry(text, normalizedConsume)
+            }
+        }
+
+        val fullReading = syllables.joinToString("")
+
+        // 1) 优先给“前缀汉字 + 后缀假名”的混合候选（如：愛してた）
+        buildLeadingKanjiMixedCandidate(syllables)?.let { mixed ->
+            if (mixed != fullReading) addCandidate(mixed, size)
+        }
+
+        // 2) 第二候选给纯假名原串
+        addCandidate(fullReading, size)
+
+        // 3) 再给分段混合候选（避免整串强制全汉字）
+        buildGreedyJapaneseSentenceCandidate(syllables, minConvertLen = 2)?.let { mixed ->
+            if (mixed != fullReading) addCandidate(mixed, size)
+        }
+
+        // 4) 最后再给整串全转换候选
+        japaneseEngine.queryCandidates(fullReading, 24).forEach { addCandidate(it, size) }
+
+        val maxPrefix = minOf(size, 8)
+        for (consume in maxPrefix downTo 1) {
+            val reading = syllables.take(consume).joinToString("")
+            val limit = when {
+                consume == size -> 24
+                consume >= 3 -> 16
+                else -> 20
+            }
+            japaneseEngine.queryCandidates(reading, limit).forEach { addCandidate(it, consume) }
+        }
+
+        val kata = hiraganaToKatakana(fullReading)
+        if (kata.isNotBlank() && kata != fullReading) {
+            addCandidate(kata, size)
+        }
+        return out.take(48)
+    }
+
+    private fun buildLeadingKanjiMixedCandidate(syllables: List<String>): String? {
+        if (syllables.size < 2) return null
+        val full = syllables.joinToString("")
+        val maxPrefix = minOf(8, syllables.size)
+        for (consume in maxPrefix downTo 2) {
+            val prefixReading = syllables.take(consume).joinToString("")
+            val prefixCand = japaneseEngine.queryCandidates(prefixReading, 12)
+                .firstOrNull { it.isNotBlank() && it != prefixReading && containsKanji(it) }
+                ?: continue
+            val suffix = syllables.drop(consume).joinToString("")
+            val mixed = prefixCand + suffix
+            if (mixed.isNotBlank() && mixed != full) return mixed
+        }
+        return null
     }
 
     private fun computeMultiSyllableCandidates(syllables: List<String>): List<CandidateEntry> {
@@ -1805,13 +2066,62 @@ class FlickImeService : InputMethodService() {
         return sentence.takeIf { it.isNotBlank() }
     }
 
+    private fun buildGreedyJapaneseSentenceCandidate(
+        syllables: List<String>,
+        minConvertLen: Int = 1
+    ): String? {
+        if (syllables.isEmpty()) return null
+        var i = 0
+        val sb = StringBuilder()
+        while (i < syllables.size) {
+            var chosen: String? = null
+            var chosenLen = 0
+            val maxChunk = minOf(8, syllables.size - i)
+            for (len in maxChunk downTo 1) {
+                if (len < minConvertLen) continue
+                val reading = syllables.subList(i, i + len).joinToString("")
+                val picked = japaneseEngine.queryCandidates(reading, if (len == 1) 6 else 8).firstOrNull()
+                if (picked != null) {
+                    chosen = picked
+                    chosenLen = len
+                    break
+                }
+            }
+            if (chosen == null || chosenLen <= 0) {
+                sb.append(syllables[i])
+                i += 1
+                continue
+            }
+            sb.append(chosen)
+            i += chosenLen
+        }
+        return sb.toString().takeIf { it.isNotBlank() }
+    }
+
+    private fun hiraganaToKatakana(text: String): String {
+        if (text.isBlank()) return text
+        val out = StringBuilder(text.length)
+        text.forEach { c ->
+            when {
+                c == 'ゔ' -> out.append('ヴ')
+                c in 'ぁ'..'ゖ' -> out.append((c.code + 0x60).toChar())
+                else -> out.append(c)
+            }
+        }
+        return out.toString()
+    }
+
+    private fun containsKanji(text: String): Boolean {
+        return text.any { it in '\u4E00'..'\u9FFF' || it in '\u3400'..'\u4DBF' }
+    }
+
     private fun candidateItemBackground(): android.graphics.drawable.Drawable? {
         // 导入输入法背景图后，候选网格去掉实体框，避免遮挡背景。
         return if (hasImageBackgroundForUi()) null else keyBackground(colorKeyBackground(), colorKeyBorder())
     }
 
     private fun requestCandidatesAsync() {
-        val query = buildQueryPinyin()
+        val query = buildQueryForCandidates()
         val syllablesSnapshot = composedSyllables.toList()
         val token = candidateToken.incrementAndGet()
         if (query.isBlank()) {
@@ -1829,16 +2139,34 @@ class FlickImeService : InputMethodService() {
         }
     }
 
-    private fun buildQueryPinyin(): String = composedSyllables.joinToString("")
+    private fun buildQueryForCandidates(): String = composedSyllables.joinToString("")
 
     private fun buildComposingDisplay(): String {
-        val base = composedSyllables.joinToString("'")
-        return if (shengmuPart.isNullOrBlank()) base else if (base.isBlank()) shengmuPart!! else "$base'${shengmuPart}"
+        val sep = if (currentInputLanguage == InputLanguage.JAPANESE) "" else "'"
+        val base = composedDisplaySyllables.joinToString(sep)
+        val pending = shengmuPart.orEmpty()
+        if (pending.isBlank()) return base
+        return if (base.isBlank()) pending else base + sep + pending
     }
 
-    private fun buildRawPinyinForCommit(): String {
+    private fun buildRawQueryForCommit(): String {
         val base = composedSyllables.joinToString("")
-        return if (shengmuPart.isNullOrBlank()) base else base + shengmuPart
+        val pending = shengmuPart.orEmpty()
+        return when (currentInputLanguage) {
+            InputLanguage.PINYIN -> if (pending.isBlank()) base else base + pending
+            InputLanguage.ZHUYIN -> if (pending.isBlank()) base else base + ZhuyinConverter.toPinyin(pending)
+            InputLanguage.JAPANESE -> base
+        }
+    }
+
+    private fun buildRawDisplayForCommit(): String {
+        val base = composedDisplaySyllables.joinToString("")
+        val pending = shengmuPart.orEmpty()
+        return when (currentInputLanguage) {
+            InputLanguage.PINYIN -> buildRawQueryForCommit()
+            InputLanguage.ZHUYIN -> if (pending.isBlank()) base else base + pending
+            InputLanguage.JAPANESE -> base
+        }
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()

@@ -264,16 +264,18 @@ object ThemePackManager {
 
     private fun parseManifest(zipFile: File): ThemePackManifest {
         ZipFile(zipFile).use { zip ->
-            val entry = zip.getEntry(MANIFEST_FILE)
-                ?: error("主题包格式错误：缺少 $MANIFEST_FILE")
+            val entryPath = resolveManifestEntryPath(zip)
+                ?: error("主题包格式错误：缺少 $MANIFEST_FILE（支持 theme_pack.json / themepack.json，大小写不敏感，可放子目录）")
+            val entry = zip.getEntry(entryPath)
+                ?: error("主题包格式错误：无法读取清单 $entryPath")
             val manifestRaw = zip.getInputStream(entry).bufferedReader(Charsets.UTF_8).use { it.readText() }
             val root = runCatching { JSONObject(manifestRaw) }
-                .getOrElse { throw IllegalArgumentException("$MANIFEST_FILE 不是有效 JSON") }
+                .getOrElse { throw IllegalArgumentException("${File(entryPath).name} 不是有效 JSON") }
 
-            val packId = root.optString("packId").trim()
-            val packName = root.optString("packName").trim()
-            val version = root.optString("version").trim()
-            val themeId = root.optString("themeId").trim().ifBlank { null }
+            val packId = readStringAlias(root, "packId", "pack_id", "id")
+            val packName = readStringAlias(root, "packName", "pack_name", "name")
+            val version = readStringAlias(root, "version", "ver")
+            val themeId = readStringAlias(root, "themeId", "theme_id").ifBlank { null }
 
             if (!PACK_ID_REGEX.matches(packId)) {
                 error("theme-pack.json 的 packId 非法，需匹配 ${PACK_ID_REGEX.pattern}")
@@ -288,31 +290,161 @@ object ThemePackManager {
                 version = version,
                 themeId = themeId,
                 assets = ThemePackAssets(
-                    font = readAssetPath(assets, "font"),
-                    imeBackground = readAssetPath(assets, "imeBackground"),
-                    keyBackground = readAssetPath(assets, "keyBackground"),
-                    keySound = readAssetPath(assets, "keySound")
+                    font = resolveAssetPath(
+                        zip = zip,
+                        rawPath = readAssetPath(assets, "font", "fontPath", "font_file"),
+                        kind = "font"
+                    ),
+                    imeBackground = resolveAssetPath(
+                        zip = zip,
+                        rawPath = readAssetPath(assets, "imeBackground", "ime_background", "background", "backgroundImage", "imeBg"),
+                        kind = "ime_background"
+                    ),
+                    keyBackground = resolveAssetPath(
+                        zip = zip,
+                        rawPath = readAssetPath(assets, "keyBackground", "key_background", "keyImage", "keyBg"),
+                        kind = "key_background"
+                    ),
+                    keySound = resolveAssetPath(
+                        zip = zip,
+                        rawPath = readAssetPath(assets, "keySound", "key_sound", "sound", "soundPath"),
+                        kind = "key_sound"
+                    )
                 )
             )
-            listOfNotNull(
-                manifest.assets.font,
-                manifest.assets.imeBackground,
-                manifest.assets.keyBackground,
-                manifest.assets.keySound
-            ).forEach { path ->
-                if (zip.getEntry(path) == null) error("主题包资源不存在：$path")
-            }
             return manifest
         }
     }
 
-    private fun readAssetPath(root: JSONObject, key: String): String? {
-        val value = root.optString(key).trim()
+    private fun readAssetPath(root: JSONObject, vararg keys: String): String? {
+        val value = keys.asSequence()
+            .map { root.optString(it).trim() }
+            .firstOrNull { it.isNotBlank() }
+            .orEmpty()
         if (value.isBlank()) return null
         if (value.startsWith("/") || value.startsWith("\\") || value.contains("..")) {
-            error("theme-pack.json 的 assets.$key 路径非法")
+            error("theme-pack.json 的 assets 路径非法：$value")
         }
         return value
+    }
+
+    private fun readStringAlias(root: JSONObject, vararg keys: String): String {
+        return keys.asSequence()
+            .map { root.optString(it).trim() }
+            .firstOrNull { it.isNotBlank() }
+            .orEmpty()
+    }
+
+    private fun resolveManifestEntryPath(zip: ZipFile): String? {
+        val candidates = listOf(
+            "theme-pack.json",
+            "theme_pack.json",
+            "themepack.json",
+            "pack.json",
+            "manifest.json"
+        )
+        candidates.forEach { name ->
+            resolveEntryPath(zip, name)?.let { return it }
+        }
+        return null
+    }
+
+    private fun resolveAssetPath(
+        zip: ZipFile,
+        rawPath: String?,
+        kind: String
+    ): String? {
+        if (!rawPath.isNullOrBlank()) {
+            resolveEntryPath(zip, rawPath)?.let { return it }
+            val fallback = detectAssetPath(zip, kind)
+            if (fallback != null) return fallback
+            error("主题包资源不存在：$rawPath")
+        }
+        return detectAssetPath(zip, kind)
+    }
+
+    private fun detectAssetPath(zip: ZipFile, kind: String): String? {
+        val preferredNames = when (kind) {
+            "font" -> listOf("assets/font.ttf", "assets/font.otf", "font.ttf", "font.otf")
+            "ime_background" -> listOf(
+                "assets/ime_background.png",
+                "assets/ime-background.png",
+                "assets/background.png",
+                "ime_background.png",
+                "background.png"
+            )
+            "key_background" -> listOf(
+                "assets/key_background.png",
+                "assets/key-background.png",
+                "assets/key.png",
+                "key_background.png",
+                "key.png"
+            )
+            "key_sound" -> listOf("assets/key_sound.wav", "assets/sound.wav", "key_sound.wav", "sound.wav")
+            else -> emptyList()
+        }
+        preferredNames.forEach { name ->
+            resolveEntryPath(zip, name)?.let { return it }
+        }
+
+        val entries = zip.entries().asSequence()
+            .filter { !it.isDirectory }
+            .map { it.name }
+            .toList()
+        if (entries.isEmpty()) return null
+
+        val (exts, keywords) = when (kind) {
+            "font" -> listOf("ttf", "otf", "ttc") to listOf("font")
+            "ime_background" -> listOf("png", "jpg", "jpeg", "webp", "bmp") to listOf("ime", "keyboard", "bg", "background")
+            "key_background" -> listOf("png", "jpg", "jpeg", "webp", "bmp") to listOf("key", "button", "bg", "background")
+            "key_sound" -> listOf("wav", "mp3", "ogg", "m4a", "aac") to listOf("key", "sound", "click")
+            else -> emptyList<String>() to emptyList()
+        }
+        if (exts.isEmpty()) return null
+
+        val byExt = entries.filter { path ->
+            val ext = File(path).extension.lowercase()
+            exts.contains(ext)
+        }
+        if (byExt.isEmpty()) return null
+
+        val byKeyword = byExt.filter { path ->
+            val lower = path.lowercase()
+            keywords.any { lower.contains(it) }
+        }
+        if (byKeyword.size == 1) return byKeyword.first()
+        if (byExt.size == 1) return byExt.first()
+        return null
+    }
+
+    private fun resolveEntryPath(zip: ZipFile, requestedPath: String): String? {
+        val all = zip.entries().asSequence()
+            .filter { !it.isDirectory }
+            .map { it.name }
+            .toList()
+        if (all.isEmpty()) return null
+
+        val normalizedWanted = normalizeZipPath(requestedPath).lowercase()
+        val exact = all.firstOrNull { normalizeZipPath(it).lowercase() == normalizedWanted }
+        if (exact != null) return exact
+
+        val wantedFileName = fileNameOf(normalizedWanted)
+        val byFileName = all.filter { fileNameOf(it).equals(wantedFileName, ignoreCase = true) }
+        if (byFileName.size == 1) return byFileName.first()
+        return byFileName.minByOrNull { normalizeZipPath(it).length }
+    }
+
+    private fun normalizeZipPath(path: String): String {
+        return path
+            .replace('\\', '/')
+            .removePrefix("./")
+            .trimStart('/')
+    }
+
+    private fun fileNameOf(path: String): String {
+        val normalized = normalizeZipPath(path)
+        val idx = normalized.lastIndexOf('/')
+        return if (idx >= 0) normalized.substring(idx + 1) else normalized
     }
 
     private fun extractZipEntry(
