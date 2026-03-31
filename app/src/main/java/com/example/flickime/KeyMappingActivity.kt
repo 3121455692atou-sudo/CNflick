@@ -31,11 +31,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.flickime.data.DefaultAlphaKeyMap
 import com.example.flickime.data.DefaultJapaneseKeyMap
 import com.example.flickime.data.DefaultKeyMap
 import com.example.flickime.data.DefaultSymbolMap
 import com.example.flickime.data.DefaultZhuyinKeyMap
 import com.example.flickime.data.KeyMapStore
+import com.example.flickime.data.MessageEaseAlphaKeyMap
 import com.example.flickime.model.DirectionalKeySpec
 import com.example.flickime.model.FlickKeySpec
 import org.json.JSONArray
@@ -48,7 +50,7 @@ class KeyMappingActivity : ComponentActivity() {
     }
 }
 
-private enum class MappingType { PINYIN, ZHUYIN, JAPANESE, SYMBOL }
+private enum class MappingType { PINYIN, ZHUYIN, JAPANESE, SYMBOL, ALPHA }
 private enum class MappingMenuLevel { MAIN, DIAGONAL }
 
 private data class KeyEdit(
@@ -72,6 +74,7 @@ private fun KeyMappingScreen() {
             "symbol" -> MappingType.SYMBOL
             "zhuyin" -> MappingType.ZHUYIN
             "japanese" -> MappingType.JAPANESE
+            "alpha" -> MappingType.ALPHA
             else -> MappingType.PINYIN
         }
     }
@@ -88,6 +91,9 @@ private fun KeyMappingScreen() {
             }
             MappingType.SYMBOL -> KeyMapStore.loadSymbolKeys(context).map {
                 KeyEdit(it.center, it.left, it.up, it.right, it.down, it.upLeft, it.upRight, it.downLeft, it.downRight, "Symbol")
+            }
+            MappingType.ALPHA -> KeyMapStore.loadAlphaKeys(context).map {
+                KeyEdit(it.center, it.left, it.up, it.right, it.down, it.upLeft, it.upRight, it.downLeft, it.downRight, "Alpha")
             }
         }
     }
@@ -112,6 +118,8 @@ private fun KeyMappingScreen() {
                     if (i < 5) "Shengmu" else "Yunmu"
                 } else if (mappingType == MappingType.JAPANESE) {
                     "Kana"
+                } else if (mappingType == MappingType.ALPHA) {
+                    "Alpha"
                 } else {
                     "Symbol"
                 }
@@ -176,8 +184,32 @@ private fun KeyMappingScreen() {
             MappingType.ZHUYIN -> "自定义注音12键映射"
             MappingType.JAPANESE -> "自定义日语假名12键映射"
             MappingType.SYMBOL -> "自定义符号12键映射"
+            MappingType.ALPHA -> "自定义英文九宫格映射"
         }
         Text(title, fontSize = 22.sp)
+        if (mappingType == MappingType.ALPHA) {
+            Text("英文键支持八方向；默认仅左/中/右有映射，其它方向留空。")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                OutlinedButton(
+                    onClick = {
+                        edits.clear()
+                        DefaultAlphaKeyMap.keys.forEach {
+                            edits.add(KeyEdit(it.center, it.left, it.up, it.right, it.down, it.upLeft, it.upRight, it.downLeft, it.downRight, "Alpha"))
+                        }
+                    },
+                    modifier = Modifier.weight(1f)
+                ) { Text("传统 ABC 预设") }
+                OutlinedButton(
+                    onClick = {
+                        edits.clear()
+                        MessageEaseAlphaKeyMap.keys.forEach {
+                            edits.add(KeyEdit(it.center, it.left, it.up, it.right, it.down, it.upLeft, it.upRight, it.downLeft, it.downRight, "Alpha"))
+                        }
+                    },
+                    modifier = Modifier.weight(1f)
+                ) { Text("MessagEase 预设") }
+            }
+        }
         if (menuLevel == MappingMenuLevel.MAIN) {
             Text("二级菜单：正向映射（中/左/上/右/下）")
             Text("保存后立即生效。斜向映射默认留空，需在三级菜单单独配置。")
@@ -240,6 +272,10 @@ private fun KeyMappingScreen() {
                     DefaultJapaneseKeyMap.keys.forEach {
                         edits.add(KeyEdit(it.center, it.left, it.up, it.right, it.down, it.upLeft, it.upRight, it.downLeft, it.downRight, "Kana"))
                     }
+                } else if (mappingType == MappingType.ALPHA) {
+                    DefaultAlphaKeyMap.keys.forEach {
+                        edits.add(KeyEdit(it.center, it.left, it.up, it.right, it.down, it.upLeft, it.upRight, it.downLeft, it.downRight, "Alpha"))
+                    }
                 } else {
                     val def = DefaultSymbolMap.keys
                     def.forEach {
@@ -301,6 +337,21 @@ private fun KeyMappingScreen() {
                         )
                     }
                     KeyMapStore.saveJapaneseKeys(context, newKeys)
+                } else if (mappingType == MappingType.ALPHA) {
+                    val newKeys = edits.map { e ->
+                        DirectionalKeySpec(
+                            center = e.center,
+                            left = e.left,
+                            up = e.up,
+                            right = e.right,
+                            down = e.down,
+                            upLeft = e.upLeft,
+                            upRight = e.upRight,
+                            downLeft = e.downLeft,
+                            downRight = e.downRight
+                        )
+                    }
+                    KeyMapStore.saveAlphaKeys(context, newKeys)
                 } else {
                     val newKeys = edits.map { e ->
                         DirectionalKeySpec(
@@ -334,6 +385,7 @@ private fun KeyMappingScreen() {
                         MappingType.ZHUYIN -> "cnflick_zhuyin_keymap.json"
                         MappingType.JAPANESE -> "cnflick_japanese_keymap.json"
                         MappingType.SYMBOL -> "cnflick_symbol_keymap.json"
+                        MappingType.ALPHA -> "cnflick_alpha_keymap.json"
                     }
                     exportLauncher.launch(fileName)
                 },

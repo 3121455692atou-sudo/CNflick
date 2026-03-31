@@ -17,6 +17,8 @@ object KeyMapStore {
 
     private const val SYMBOL_SCHEMA_VERSION = "symbol_schema_version"
     private const val SYMBOL_SCHEMA_V3 = 3
+    private const val ALPHA_SCHEMA_VERSION = "alpha_schema_version"
+    private const val ALPHA_SCHEMA_V1 = 1
 
     fun loadPinyinKeys(context: Context): List<FlickKeySpec> {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
@@ -41,18 +43,24 @@ object KeyMapStore {
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val editor = prefs.edit()
         keys.forEachIndexed { index, k ->
-            editor.putString("pinyin_${index}_center", k.center.trim().lowercase())
-            editor.putString("pinyin_${index}_left", k.left.trim().lowercase())
-            editor.putString("pinyin_${index}_up", k.up.trim().lowercase())
-            editor.putString("pinyin_${index}_right", k.right.trim().lowercase())
-            editor.putString("pinyin_${index}_down", k.down.trim().lowercase())
-            editor.putString("pinyin_${index}_up_left", k.upLeft.trim().lowercase())
-            editor.putString("pinyin_${index}_up_right", k.upRight.trim().lowercase())
-            editor.putString("pinyin_${index}_down_left", k.downLeft.trim().lowercase())
-            editor.putString("pinyin_${index}_down_right", k.downRight.trim().lowercase())
+            editor.putString("pinyin_${index}_center", normalizePinyinMappingValue(k.center))
+            editor.putString("pinyin_${index}_left", normalizePinyinMappingValue(k.left))
+            editor.putString("pinyin_${index}_up", normalizePinyinMappingValue(k.up))
+            editor.putString("pinyin_${index}_right", normalizePinyinMappingValue(k.right))
+            editor.putString("pinyin_${index}_down", normalizePinyinMappingValue(k.down))
+            editor.putString("pinyin_${index}_up_left", normalizePinyinMappingValue(k.upLeft))
+            editor.putString("pinyin_${index}_up_right", normalizePinyinMappingValue(k.upRight))
+            editor.putString("pinyin_${index}_down_left", normalizePinyinMappingValue(k.downLeft))
+            editor.putString("pinyin_${index}_down_right", normalizePinyinMappingValue(k.downRight))
         }
         editor.putInt(PINYIN_SCHEMA_VERSION, PINYIN_SCHEMA_V4)
         editor.apply()
+    }
+
+    private fun normalizePinyinMappingValue(value: String): String {
+        if (value.isEmpty()) return value
+        if (value.isBlank()) return value
+        return value.lowercase()
     }
 
     fun loadZhuyinKeys(context: Context): List<FlickKeySpec> {
@@ -226,6 +234,54 @@ object KeyMapStore {
         editor.apply()
     }
 
+    fun loadAlphaKeys(context: Context): List<DirectionalKeySpec> {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        ensureAlphaSchema(prefs, context)
+        return DefaultAlphaKeyMap.keys.mapIndexed { index, def ->
+            DirectionalKeySpec(
+                center = prefs.getString("alpha_${index}_center", def.center).orEmpty(),
+                left = prefs.getString("alpha_${index}_left", def.left).orEmpty(),
+                up = prefs.getString("alpha_${index}_up", def.up).orEmpty(),
+                right = prefs.getString("alpha_${index}_right", def.right).orEmpty(),
+                down = prefs.getString("alpha_${index}_down", def.down).orEmpty(),
+                upLeft = prefs.getString("alpha_${index}_up_left", def.upLeft).orEmpty(),
+                upRight = prefs.getString("alpha_${index}_up_right", def.upRight).orEmpty(),
+                downLeft = prefs.getString("alpha_${index}_down_left", def.downLeft).orEmpty(),
+                downRight = prefs.getString("alpha_${index}_down_right", def.downRight).orEmpty()
+            )
+        }
+    }
+
+    fun saveAlphaKeys(context: Context, keys: List<DirectionalKeySpec>) {
+        val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val editor = prefs.edit()
+        keys.forEachIndexed { index, k ->
+            editor.putString("alpha_${index}_center", k.center.trim())
+            editor.putString("alpha_${index}_left", k.left.trim())
+            editor.putString("alpha_${index}_up", k.up.trim())
+            editor.putString("alpha_${index}_right", k.right.trim())
+            editor.putString("alpha_${index}_down", k.down.trim())
+            editor.putString("alpha_${index}_up_left", k.upLeft.trim())
+            editor.putString("alpha_${index}_up_right", k.upRight.trim())
+            editor.putString("alpha_${index}_down_left", k.downLeft.trim())
+            editor.putString("alpha_${index}_down_right", k.downRight.trim())
+        }
+        editor.putInt(ALPHA_SCHEMA_VERSION, ALPHA_SCHEMA_V1)
+        editor.apply()
+    }
+
+    private fun ensureAlphaSchema(prefs: SharedPreferences, context: Context) {
+        val current = prefs.getInt(ALPHA_SCHEMA_VERSION, 0)
+        if (current >= ALPHA_SCHEMA_V1) return
+        val k1Center = prefs.getString("alpha_0_center", null)
+        val k9Center = prefs.getString("alpha_8_center", null)
+        val looksLegacyDefault = k1Center == "b" && k9Center == "z"
+        if (looksLegacyDefault) {
+            saveAlphaKeys(context, DefaultAlphaKeyMap.keys)
+        }
+        prefs.edit().putInt(ALPHA_SCHEMA_VERSION, ALPHA_SCHEMA_V1).apply()
+    }
+
     private fun ensureSymbolSchema(prefs: SharedPreferences, context: Context) {
         val current = prefs.getInt(SYMBOL_SCHEMA_VERSION, 0)
         if (current >= SYMBOL_SCHEMA_V3) return
@@ -325,6 +381,23 @@ object KeyMapStore {
             editor.remove("symbol_${index}_down_right")
         }
         editor.putInt(SYMBOL_SCHEMA_VERSION, SYMBOL_SCHEMA_V3)
+        editor.apply()
+    }
+
+    fun resetAlphaKeys(context: Context) {
+        val editor = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+        repeat(12) { index ->
+            editor.remove("alpha_${index}_center")
+            editor.remove("alpha_${index}_left")
+            editor.remove("alpha_${index}_up")
+            editor.remove("alpha_${index}_right")
+            editor.remove("alpha_${index}_down")
+            editor.remove("alpha_${index}_up_left")
+            editor.remove("alpha_${index}_up_right")
+            editor.remove("alpha_${index}_down_left")
+            editor.remove("alpha_${index}_down_right")
+        }
+        editor.putInt(ALPHA_SCHEMA_VERSION, ALPHA_SCHEMA_V1)
         editor.apply()
     }
 }

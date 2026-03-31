@@ -8,11 +8,11 @@
 开发者：忧郁乔班尼
 
 ## 下载
-- v1.3（最新）APK：
-  - https://github.com/3121455692atou-sudo/CNflick/releases/download/v1.3.0/CNflick-v1.3-debug.apk
-- v1.3 主题包（魔法少女小圆）：
-  - https://github.com/3121455692atou-sudo/CNflick/releases/download/v1.3.0/cnflick-theme-madoka.zip
+- v1.5（最新）APK：
+  - GitHub: https://github.com/3121455692atou-sudo/CNflick/raw/main/release/CNflick-v1.5-debug.apk
+  - Gitee: https://gitee.com/atonelia/CNflick/raw/main/release/CNflick-v1.5-debug.apk
 - 历史版本：
+  - v1.3：https://github.com/3121455692atou-sudo/CNflick/releases/download/v1.3.0/CNflick-v1.3-debug.apk
   - v1.2：https://github.com/3121455692atou-sudo/CNflick/releases/download/v1.2.0/CNflick-v1.2-debug.apk
   - v1.1：https://github.com/3121455692atou-sudo/CNflick/releases/download/v1.1.0/CNflick-v1.1-debug.apk
 

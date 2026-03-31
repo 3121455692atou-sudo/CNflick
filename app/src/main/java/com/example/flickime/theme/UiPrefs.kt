@@ -1,6 +1,7 @@
 package com.example.flickime.theme
 
 import android.content.Context
+import android.graphics.Color
 import com.example.flickime.model.InputLanguage
 
 object UiPrefs {
@@ -27,6 +28,8 @@ object UiPrefs {
     const val KEY_CURRENT_INPUT_LANGUAGE = "current_input_language"
     const val KEY_ENABLED_INPUT_LANGUAGES = "enabled_input_languages"
     const val KEY_GLOBE_LANGUAGE_SWITCH_ENABLED = "globe_language_switch_enabled"
+    const val KEY_ACTION_KEY_ORDER = "action_key_order"
+    const val KEY_FONT_COLOR_HEX = "font_color_hex"
 
     const val GLOBE_KEY_MODE_NORMAL = "normal"
     const val GLOBE_KEY_MODE_HIDDEN = "hidden"
@@ -36,6 +39,11 @@ object UiPrefs {
     const val LANG_ZHUYIN = "zhuyin"
     const val LANG_JAPANESE = "japanese"
 
+    const val ACTION_KEY_BACKSPACE = "backspace"
+    const val ACTION_KEY_SPACE = "space"
+    const val ACTION_KEY_ENTER = "enter"
+    const val ACTION_KEY_FUNC = "func"
+
     const val MIKU_BG_ASSET = "asset://backgrounds/default_miku.jpg"
     private const val DEFAULT_CENTER_TEXT_SP = 18f
     private const val DEFAULT_SIDE_TEXT_SP = 10f
@@ -44,6 +52,12 @@ object UiPrefs {
     private const val DEFAULT_KEY_BG_ALPHA = 0.85f
     private const val DEFAULT_KEY_SIZE_SCALE = 1f
     private const val DEFAULT_KEY_GAP_DP = 4f
+    private val DEFAULT_ACTION_KEY_ORDER = listOf(
+        ACTION_KEY_BACKSPACE,
+        ACTION_KEY_SPACE,
+        ACTION_KEY_FUNC,
+        ACTION_KEY_ENTER
+    )
     fun prefs(context: Context) = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
     fun getCenterTextSp(context: Context): Float = prefs(context).getFloat(KEY_CENTER_TEXT_SP, DEFAULT_CENTER_TEXT_SP)
@@ -78,6 +92,41 @@ object UiPrefs {
 
     fun getShowCenterKeyText(context: Context): Boolean = prefs(context).getBoolean(KEY_SHOW_CENTER_KEY_TEXT, true)
     fun getShowSideKeyText(context: Context): Boolean = prefs(context).getBoolean(KEY_SHOW_SIDE_KEY_TEXT, true)
+    fun getFontColorHex(context: Context): String = prefs(context).getString(KEY_FONT_COLOR_HEX, "").orEmpty()
+    fun setFontColorHex(context: Context, hex: String) {
+        prefs(context).edit().putString(KEY_FONT_COLOR_HEX, normalizeColorHex(hex)).apply()
+    }
+
+    fun clearFontColorHex(context: Context) {
+        prefs(context).edit().putString(KEY_FONT_COLOR_HEX, "").apply()
+    }
+
+    fun resolveFontColor(context: Context): Int? {
+        val raw = getFontColorHex(context)
+        if (raw.isBlank()) return null
+        return try {
+            Color.parseColor(raw)
+        } catch (_: Throwable) {
+            null
+        }
+    }
+    fun getActionKeyOrder(context: Context): List<String> {
+        val raw = prefs(context).getString(KEY_ACTION_KEY_ORDER, "").orEmpty()
+        val parsed = raw.split(",")
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+        return normalizeActionKeyOrder(parsed)
+    }
+
+    fun setActionKeyOrder(context: Context, order: List<String>) {
+        val normalized = normalizeActionKeyOrder(order)
+        prefs(context).edit()
+            .putString(KEY_ACTION_KEY_ORDER, normalized.joinToString(","))
+            .apply()
+    }
+
+    fun defaultActionKeyOrder(): List<String> = DEFAULT_ACTION_KEY_ORDER.toList()
+
     fun getGlobeLanguageSwitchEnabled(context: Context): Boolean {
         return prefs(context).getBoolean(KEY_GLOBE_LANGUAGE_SWITCH_ENABLED, true)
     }
@@ -166,6 +215,8 @@ object UiPrefs {
             .putBoolean(KEY_GLOBE_LANGUAGE_SWITCH_ENABLED, true)
             .putString(KEY_CURRENT_INPUT_LANGUAGE, LANG_PINYIN)
             .putStringSet(KEY_ENABLED_INPUT_LANGUAGES, setOf(LANG_PINYIN, LANG_ZHUYIN, LANG_JAPANESE))
+            .putString(KEY_ACTION_KEY_ORDER, DEFAULT_ACTION_KEY_ORDER.joinToString(","))
+            .putString(KEY_FONT_COLOR_HEX, "")
             .apply()
     }
 
@@ -176,5 +227,23 @@ object UiPrefs {
             .putBoolean(KEY_USE_CUSTOM_SOUND, false)
             .putString(KEY_CUSTOM_SOUND_PATH, "")
             .apply()
+    }
+
+    private fun normalizeActionKeyOrder(raw: List<String>): List<String> {
+        val allowed = setOf(ACTION_KEY_BACKSPACE, ACTION_KEY_SPACE, ACTION_KEY_ENTER, ACTION_KEY_FUNC)
+        val distinct = raw.filter { it in allowed }.distinct().toMutableList()
+        if (distinct.size == DEFAULT_ACTION_KEY_ORDER.size) return distinct
+        DEFAULT_ACTION_KEY_ORDER.forEach { key ->
+            if (key !in distinct) distinct += key
+        }
+        return distinct.take(DEFAULT_ACTION_KEY_ORDER.size)
+    }
+
+    private fun normalizeColorHex(raw: String): String {
+        val v = raw.trim().uppercase()
+        if (v.isBlank()) return ""
+        val withPrefix = if (v.startsWith("#")) v else "#$v"
+        val body = withPrefix.removePrefix("#")
+        return if (body.length == 6 || body.length == 8) withPrefix else ""
     }
 }

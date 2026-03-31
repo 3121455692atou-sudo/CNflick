@@ -1,5 +1,16 @@
 # CNflick 发布说明
 
+## v1.5
+- 修复：首次唤出偶发首字不生效。
+- 修复：主题切换后候选条底色残留。
+- 优化：删除回退更细粒度，减少整音节重输。
+- 新增：英文映射可选「传统 ABC / MessagEase」预设，支持八方向映射与提示。
+
+下载：
+- APK：
+  - GitHub: https://github.com/3121455692atou-sudo/CNflick/raw/main/release/CNflick-v1.5-debug.apk
+  - Gitee: https://gitee.com/atonelia/CNflick/raw/main/release/CNflick-v1.5-debug.apk
+
 ## v1.3
 - 新增输入语言体系：
   - 拼音 / 注音 / 日语假名可在同一输入法中切换。

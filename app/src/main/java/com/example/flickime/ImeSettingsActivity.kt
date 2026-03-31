@@ -19,6 +19,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -63,6 +64,7 @@ private fun ImeSettingsScreen() {
 
     var allFonts by remember { mutableStateOf(FontManager.getAllFonts(context)) }
     var currentFontId by remember { mutableStateOf(FontManager.getCurrentFontId(context)) }
+    var fontColorHex by remember { mutableStateOf(UiPrefs.getFontColorHex(context)) }
 
     var imeBgOptions by remember { mutableStateOf(BackgroundImageManager.getImeOptions(context)) }
     var keyBgOptions by remember { mutableStateOf(BackgroundImageManager.getKeyOptions(context)) }
@@ -87,6 +89,8 @@ private fun ImeSettingsScreen() {
     var enabledInputLanguages by remember { mutableStateOf(UiPrefs.getEnabledInputLanguages(context)) }
     var importedThemePacks by remember { mutableStateOf(ThemePackManager.getAvailablePacks(context)) }
     var currentThemePackId by remember { mutableStateOf(ThemePackManager.getCurrentPackId(context)) }
+    var actionKeyOrder by remember { mutableStateOf(UiPrefs.getActionKeyOrder(context)) }
+    var selectedActionIndex by remember { mutableStateOf<Int?>(null) }
 
     fun refreshBgOptions() {
         imeBgOptions = BackgroundImageManager.getImeOptions(context)
@@ -100,6 +104,7 @@ private fun ImeSettingsScreen() {
         currentThemeId = ThemeManager.getCurrentTheme(context).id
         allFonts = FontManager.getAllFonts(context)
         currentFontId = FontManager.getCurrentFontId(context)
+        fontColorHex = UiPrefs.getFontColorHex(context)
         useCustomSound = UiPrefs.getUseCustomSound(context)
         showFlickHintOverlay = UiPrefs.getShowFlickHintOverlay(context)
         enableEightDirectionPinyin = UiPrefs.getEnableEightDirectionPinyin(context)
@@ -108,6 +113,8 @@ private fun ImeSettingsScreen() {
         showSideKeyText = UiPrefs.getShowSideKeyText(context)
         globeLanguageSwitchEnabled = UiPrefs.getGlobeLanguageSwitchEnabled(context)
         enabledInputLanguages = UiPrefs.getEnabledInputLanguages(context)
+        actionKeyOrder = UiPrefs.getActionKeyOrder(context)
+        selectedActionIndex = null
         refreshBgOptions()
         importedThemePacks = ThemePackManager.getAvailablePacks(context)
         currentThemePackId = ThemePackManager.getCurrentPackId(context)
@@ -134,6 +141,28 @@ private fun ImeSettingsScreen() {
         if (!next.contains(UiPrefs.getCurrentInputLanguage(context))) {
             UiPrefs.setCurrentInputLanguage(context, next.first())
         }
+    }
+
+    fun updateActionKeyOrder(order: List<String>) {
+        actionKeyOrder = order
+        UiPrefs.setActionKeyOrder(context, order)
+    }
+
+    fun swapActionKeyOrder(indexA: Int, indexB: Int) {
+        if (indexA !in actionKeyOrder.indices || indexB !in actionKeyOrder.indices) return
+        if (indexA == indexB) return
+        val next = actionKeyOrder.toMutableList()
+        val tmp = next[indexA]
+        next[indexA] = next[indexB]
+        next[indexB] = tmp
+        updateActionKeyOrder(next)
+    }
+
+    fun quickSwapEnterAndFunc() {
+        val enter = actionKeyOrder.indexOf(UiPrefs.ACTION_KEY_ENTER)
+        val func = actionKeyOrder.indexOf(UiPrefs.ACTION_KEY_FUNC)
+        if (enter < 0 || func < 0) return
+        swapActionKeyOrder(enter, func)
     }
 
     fun persistUri(uri: Uri) {
@@ -280,6 +309,17 @@ private fun ImeSettingsScreen() {
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) { Text("自定义日语假名映射") }
+
+                OutlinedButton(
+                    onClick = {
+                        context.startActivity(
+                            Intent(context, KeyMappingActivity::class.java)
+                                .putExtra("map_type", "alpha")
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("自定义英文九宫格映射") }
             }
 
             SettingsPage.THEME -> {
@@ -347,6 +387,35 @@ private fun ImeSettingsScreen() {
                     currentFontId = FontManager.getCurrentFontId(context)
                     Toast.makeText(context, "字体已恢复默认", Toast.LENGTH_SHORT).show()
                 }, modifier = Modifier.fillMaxWidth()) { Text("恢复默认字体") }
+
+                Text("字体颜色（HEX，示例：#111827）")
+                Text("本输入法使用 HEX 颜色代码（#RRGGBB 或 #AARRGGBB）。")
+                Text("可在浏览器搜索“颜色代码 HEX”或“color picker hex”获取颜色值。")
+                OutlinedTextField(
+                    value = fontColorHex,
+                    onValueChange = { fontColorHex = it },
+                    label = { Text("颜色值") },
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = {
+                            UiPrefs.setFontColorHex(context, fontColorHex)
+                            fontColorHex = UiPrefs.getFontColorHex(context)
+                            val msg = if (fontColorHex.isBlank()) "颜色格式无效，未生效" else "字体颜色已应用：$fontColorHex"
+                            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) { Text("应用颜色") }
+                    OutlinedButton(
+                        onClick = {
+                            UiPrefs.clearFontColorHex(context)
+                            fontColorHex = ""
+                            Toast.makeText(context, "字体颜色已恢复跟随主题", Toast.LENGTH_SHORT).show()
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) { Text("跟随主题") }
+                }
                 OutlinedButton(onClick = { page = SettingsPage.ROOT }, modifier = Modifier.fillMaxWidth()) { Text("返回") }
             }
 
@@ -468,6 +537,48 @@ private fun ImeSettingsScreen() {
                     modifier = Modifier.fillMaxWidth()
                 ) { Text(if (globeKeyMode == UiPrefs.GLOBE_KEY_MODE_DISABLED) "✓ 显示但禁用地球键" else "显示但禁用地球键") }
 
+                Text("右侧功能键位置（点击两项互换）")
+                actionKeyOrder.forEachIndexed { index, key ->
+                    val selected = selectedActionIndex == index
+                    val label = buildString {
+                        if (selected) append("✓ ")
+                        append("第")
+                        append(index + 1)
+                        append("行：")
+                        append(actionKeyLabel(key))
+                    }
+                    OutlinedButton(
+                        onClick = {
+                            val first = selectedActionIndex
+                            if (first == null) {
+                                selectedActionIndex = index
+                            } else if (first == index) {
+                                selectedActionIndex = null
+                            } else {
+                                swapActionKeyOrder(first, index)
+                                selectedActionIndex = null
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) { Text(label) }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    OutlinedButton(
+                        onClick = {
+                            quickSwapEnterAndFunc()
+                            selectedActionIndex = null
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) { Text("回车↔功能") }
+                    OutlinedButton(
+                        onClick = {
+                            updateActionKeyOrder(UiPrefs.defaultActionKeyOrder())
+                            selectedActionIndex = null
+                        },
+                        modifier = Modifier.weight(1f)
+                    ) { Text("默认位置") }
+                }
+
                 Text("中间字体大小: ${"%.1f".format(centerSp)}sp")
                 Slider(value = centerSp, onValueChange = {
                     centerSp = it
@@ -527,6 +638,9 @@ private fun ImeSettingsScreen() {
                     showSideKeyText = UiPrefs.getShowSideKeyText(context)
                     globeLanguageSwitchEnabled = UiPrefs.getGlobeLanguageSwitchEnabled(context)
                     enabledInputLanguages = UiPrefs.getEnabledInputLanguages(context)
+                    actionKeyOrder = UiPrefs.getActionKeyOrder(context)
+                    selectedActionIndex = null
+                    fontColorHex = UiPrefs.getFontColorHex(context)
                     Toast.makeText(context, "外观设置已恢复默认", Toast.LENGTH_SHORT).show()
                 }, modifier = Modifier.fillMaxWidth()) { Text("恢复默认外观") }
 
@@ -567,5 +681,15 @@ private fun ImeSettingsScreen() {
                 OutlinedButton(onClick = { page = SettingsPage.ROOT }, modifier = Modifier.fillMaxWidth()) { Text("返回") }
             }
         }
+    }
+}
+
+private fun actionKeyLabel(key: String): String {
+    return when (key) {
+        UiPrefs.ACTION_KEY_BACKSPACE -> "⌫ 删除"
+        UiPrefs.ACTION_KEY_SPACE -> "空格"
+        UiPrefs.ACTION_KEY_ENTER -> "回车"
+        UiPrefs.ACTION_KEY_FUNC -> "功能"
+        else -> key
     }
 }
