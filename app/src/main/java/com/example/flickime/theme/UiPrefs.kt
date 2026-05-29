@@ -27,6 +27,7 @@ object UiPrefs {
     const val KEY_GLOBE_KEY_MODE = "globe_key_mode"
     const val KEY_CURRENT_INPUT_LANGUAGE = "current_input_language"
     const val KEY_ENABLED_INPUT_LANGUAGES = "enabled_input_languages"
+    const val KEY_SHAPE_LANGUAGE_MIGRATED = "shape_language_migrated"
     const val KEY_GLOBE_LANGUAGE_SWITCH_ENABLED = "globe_language_switch_enabled"
     const val KEY_ACTION_KEY_ORDER = "action_key_order"
     const val KEY_FONT_COLOR_HEX = "font_color_hex"
@@ -38,9 +39,11 @@ object UiPrefs {
     const val LANG_PINYIN = "pinyin"
     const val LANG_ZHUYIN = "zhuyin"
     const val LANG_JAPANESE = "japanese"
+    const val LANG_SHAPE = "shape"
 
     const val ACTION_KEY_BACKSPACE = "backspace"
     const val ACTION_KEY_SPACE = "space"
+    const val ACTION_KEY_VOICE = "voice"
     const val ACTION_KEY_ENTER = "enter"
     const val ACTION_KEY_FUNC = "func"
 
@@ -54,7 +57,7 @@ object UiPrefs {
     private const val DEFAULT_KEY_GAP_DP = 4f
     private val DEFAULT_ACTION_KEY_ORDER = listOf(
         ACTION_KEY_BACKSPACE,
-        ACTION_KEY_SPACE,
+        ACTION_KEY_VOICE,
         ACTION_KEY_FUNC,
         ACTION_KEY_ENTER
     )
@@ -145,10 +148,19 @@ object UiPrefs {
     }
 
     fun getEnabledInputLanguages(context: Context): Set<InputLanguage> {
-        val defaults = setOf(LANG_PINYIN, LANG_ZHUYIN, LANG_JAPANESE)
-        val raw = prefs(context).getStringSet(KEY_ENABLED_INPUT_LANGUAGES, defaults).orEmpty()
+        val defaults = setOf(LANG_PINYIN, LANG_ZHUYIN, LANG_JAPANESE, LANG_SHAPE)
+        val p = prefs(context)
+        val rawStored = p.getStringSet(KEY_ENABLED_INPUT_LANGUAGES, null)
+        val raw = rawStored ?: defaults
         val mapped = raw.map { InputLanguage.fromId(it) }.toMutableSet()
         if (mapped.isEmpty()) mapped += InputLanguage.PINYIN
+        if (rawStored != null && !p.getBoolean(KEY_SHAPE_LANGUAGE_MIGRATED, false)) {
+            mapped += InputLanguage.SHAPE
+            p.edit()
+                .putStringSet(KEY_ENABLED_INPUT_LANGUAGES, mapped.map { it.id }.toSet())
+                .putBoolean(KEY_SHAPE_LANGUAGE_MIGRATED, true)
+                .apply()
+        }
         return mapped
     }
 
@@ -214,7 +226,8 @@ object UiPrefs {
             .putBoolean(KEY_SHOW_SIDE_KEY_TEXT, true)
             .putBoolean(KEY_GLOBE_LANGUAGE_SWITCH_ENABLED, true)
             .putString(KEY_CURRENT_INPUT_LANGUAGE, LANG_PINYIN)
-            .putStringSet(KEY_ENABLED_INPUT_LANGUAGES, setOf(LANG_PINYIN, LANG_ZHUYIN, LANG_JAPANESE))
+            .putStringSet(KEY_ENABLED_INPUT_LANGUAGES, setOf(LANG_PINYIN, LANG_ZHUYIN, LANG_JAPANESE, LANG_SHAPE))
+            .putBoolean(KEY_SHAPE_LANGUAGE_MIGRATED, true)
             .putString(KEY_ACTION_KEY_ORDER, DEFAULT_ACTION_KEY_ORDER.joinToString(","))
             .putString(KEY_FONT_COLOR_HEX, "")
             .apply()
@@ -230,8 +243,11 @@ object UiPrefs {
     }
 
     private fun normalizeActionKeyOrder(raw: List<String>): List<String> {
-        val allowed = setOf(ACTION_KEY_BACKSPACE, ACTION_KEY_SPACE, ACTION_KEY_ENTER, ACTION_KEY_FUNC)
-        val distinct = raw.filter { it in allowed }.distinct().toMutableList()
+        val allowed = setOf(ACTION_KEY_BACKSPACE, ACTION_KEY_VOICE, ACTION_KEY_ENTER, ACTION_KEY_FUNC)
+        val distinct = raw.map { if (it == ACTION_KEY_SPACE) ACTION_KEY_VOICE else it }
+            .filter { it in allowed }
+            .distinct()
+            .toMutableList()
         if (distinct.size == DEFAULT_ACTION_KEY_ORDER.size) return distinct
         DEFAULT_ACTION_KEY_ORDER.forEach { key ->
             if (key !in distinct) distinct += key

@@ -1,8 +1,10 @@
 package com.example.flickime
 
+import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Typeface
@@ -11,8 +13,11 @@ import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.GradientDrawable
 import android.graphics.drawable.LayerDrawable
 import android.inputmethodservice.InputMethodService
+import android.media.AudioFormat
 import android.media.AudioAttributes
 import android.media.AudioManager
+import android.media.AudioRecord
+import android.media.MediaRecorder
 import android.media.SoundPool
 import android.os.Build
 import android.os.Handler
@@ -29,6 +34,7 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.HapticFeedbackConstants
 import android.view.ViewGroup
+import android.view.WindowInsets
 import android.view.inputmethod.InputConnection
 import android.widget.FrameLayout
 import android.widget.GridLayout
@@ -37,10 +43,12 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.TextView
+import android.widget.Toast
 import com.example.flickime.data.KeyMapStore
 import com.example.flickime.engine.JapaneseEngine
 import com.example.flickime.engine.LexiconManager
 import com.example.flickime.engine.PinyinEngine
+import com.example.flickime.engine.ShapeCodeManager
 import com.example.flickime.engine.ZhuyinConverter
 import com.example.flickime.model.FlickDirection
 import com.example.flickime.model.FlickKeySpec
@@ -50,7 +58,17 @@ import com.example.flickime.theme.FontManager
 import com.example.flickime.theme.KeyboardTheme
 import com.example.flickime.theme.ThemeManager
 import com.example.flickime.theme.UiPrefs
+import com.k2fsa.sherpa.onnx.FeatureConfig
+import com.k2fsa.sherpa.onnx.OfflineModelConfig
+import com.k2fsa.sherpa.onnx.OfflineRecognizer
+import com.k2fsa.sherpa.onnx.OfflineRecognizerConfig
+import com.k2fsa.sherpa.onnx.OfflineSenseVoiceModelConfig
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.math.BigDecimal
+import java.math.RoundingMode
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import java.util.Locale
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
@@ -59,6 +77,7 @@ import kotlin.math.abs
 class FlickImeService : InputMethodService() {
     companion object {
         private const val SETTINGS_PREFS = "flick_settings"
+        private const val VOICE_SAMPLE_RATE = 16_000
     }
     private data class DirectionalSpec(
         val center: String,
@@ -73,7 +92,13 @@ class FlickImeService : InputMethodService() {
     )
     private data class CandidateEntry(
         val text: String,
-        val consumeSyllables: Int
+        val consumeSyllables: Int,
+        val recordChoice: Boolean = true,
+        val replaceBeforeCursor: Int = 0
+    )
+    private data class InitialContextQuery(
+        val typedLength: Int,
+        val tokens: List<String>
     )
     private data class ModeSwitchEntry(
         val container: FrameLayout,
@@ -85,6 +110,7 @@ class FlickImeService : InputMethodService() {
     private lateinit var japaneseEngine: JapaneseEngine
     private val candidateExecutor = Executors.newSingleThreadExecutor()
     private val warmupExecutor = Executors.newSingleThreadExecutor()
+    private val voiceExecutor = Executors.newSingleThreadExecutor()
     private val mainHandler = Handler(Looper.getMainLooper())
     private val candidateToken = AtomicInteger(0)
     private lateinit var keyboardTheme: KeyboardTheme
@@ -108,6 +134,12 @@ class FlickImeService : InputMethodService() {
     private var vibrator: Vibrator? = null
     private var soundPool: SoundPool? = null
     private var customSoundId: Int = 0
+    private var senseVoiceRecognizer: OfflineRecognizer? = null
+    private var senseVoiceLoading: Boolean = false
+    private var voiceAudioRecord: AudioRecord? = null
+    private var voiceAudioBytes: ByteArrayOutputStream? = null
+    private var voiceRecordingThread: Thread? = null
+    private var voiceListening: Boolean = false
 
     private var shengmuPart: String? = null
     private val composedSyllables = mutableListOf<String>()
@@ -155,7 +187,12 @@ class FlickImeService : InputMethodService() {
     private val clipListener = ClipboardManager.OnPrimaryClipChangedListener { captureSystemClipboard() }
     private val modeSwitchViews = mutableListOf<ModeSwitchEntry>()
     private var currentInputLanguage: InputLanguage = InputLanguage.PINYIN
-    private var enabledInputLanguages: List<InputLanguage> = listOf(InputLanguage.PINYIN, InputLanguage.ZHUYIN, InputLanguage.JAPANESE)
+    private var enabledInputLanguages: List<InputLanguage> = listOf(
+        InputLanguage.PINYIN,
+        InputLanguage.ZHUYIN,
+        InputLanguage.JAPANESE,
+        InputLanguage.SHAPE
+    )
     private val japaneseModifierTokens = setOf("゛゜小", "小゛゜", "ﾞﾟ小", "小ﾞﾟ")
     private val japaneseTransformCycles = listOf(
         listOf("あ", "ぁ"), listOf("い", "ぃ"), listOf("う", "ぅ", "ゔ"), listOf("え", "ぇ"), listOf("お", "ぉ"),
@@ -174,6 +211,7 @@ class FlickImeService : InputMethodService() {
         "r", "z", "c", "s",
         "y", "w"
     )
+    private val pinyinSeparatorCharsArray = charArrayOf('\'', '’', '‘', '＇', '`', '｀')
     private val zhuyinInitialsForBackspace = setOf(
         "ㄅ", "ㄆ", "ㄇ", "ㄈ",
         "ㄉ", "ㄊ", "ㄋ", "ㄌ",
@@ -184,11 +222,11 @@ class FlickImeService : InputMethodService() {
     )
 
     private enum class Mode { FLICK, ALPHA, NUM, SYMBOL, CANDIDATE, FUNC, CLIPBOARD }
-    private enum class ActionKeyKind { BACKSPACE, SPACE, ENTER, FUNC }
+    private enum class ActionKeyKind { BACKSPACE, VOICE, ENTER, FUNC }
     private var mode: Mode = Mode.FLICK
     private var rightActionKeyOrder: List<ActionKeyKind> = listOf(
         ActionKeyKind.BACKSPACE,
-        ActionKeyKind.SPACE,
+        ActionKeyKind.VOICE,
         ActionKeyKind.FUNC,
         ActionKeyKind.ENTER
     )
@@ -200,6 +238,7 @@ class FlickImeService : InputMethodService() {
         warmupExecutor.execute {
             runCatching { pinyinEngine.queryCandidates("ni", 1) }
             runCatching { LexiconManager.warmup(this) }
+            runCatching { ShapeCodeManager.warmup(this) }
             runCatching { com.example.flickime.engine.JapaneseLexiconManager.warmup(this) }
         }
         keyboardTheme = ThemeManager.getCurrentTheme(this)
@@ -227,8 +266,12 @@ class FlickImeService : InputMethodService() {
         clipboardManager.removePrimaryClipChangedListener(clipListener)
         soundPool?.release()
         soundPool = null
+        stopSenseVoiceRecording(recognize = false)
+        senseVoiceRecognizer?.release()
+        senseVoiceRecognizer = null
         candidateExecutor.shutdownNow()
         warmupExecutor.shutdownNow()
+        voiceExecutor.shutdownNow()
         super.onDestroy()
     }
 
@@ -260,13 +303,28 @@ class FlickImeService : InputMethodService() {
 
         inputRootView = root
 
+        val contentLeftPadding = dp(4)
+        val contentTopPadding = dp(4)
+        val contentRightPadding = dp(4)
+        val contentBottomPadding = dp(6)
         val content = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(4), dp(4), dp(4), dp(6))
+            setPadding(contentLeftPadding, contentTopPadding, contentRightPadding, contentBottomPadding)
             layoutParams = FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             clipChildren = false
             clipToPadding = false
         }
+        root.setOnApplyWindowInsetsListener { _, insets ->
+            val navBottom = navigationBarBottomInset(insets)
+            content.setPadding(
+                contentLeftPadding,
+                contentTopPadding,
+                contentRightPadding,
+                contentBottomPadding + navBottom
+            )
+            insets
+        }
+        root.post { root.requestApplyInsets() }
 
         content.addView(buildCandidateStrip())
 
@@ -525,8 +583,8 @@ class FlickImeService : InputMethodService() {
             DirectionalSpec("w", "v", "", "x", ""),
             DirectionalSpec("z", "y", "", "'", ""),
             DirectionalSpec(",", ";", "", ".", ""),
-            DirectionalSpec("大写锁定", "", "", "", ""),
-            DirectionalSpec("?", "!", "", "\"", "")
+            DirectionalSpec(" ", "", "", "", ""),
+            DirectionalSpec("⇧", "?", "'", "!", "\"")
         )
         val alpha = if (specs.size >= 12) specs else fallback
 
@@ -538,7 +596,7 @@ class FlickImeService : InputMethodService() {
             listOf(
                 modeSwitchKey("符号", Mode.SYMBOL),
                 alphaFlickKey(alpha[9]),
-                controlKey(if (alphaCapsLock) "大写锁定开" else alpha[10].center.ifBlank { "大写锁定关" }) { toggleAlphaCaps() },
+                alphaFlickKey(alpha[10]),
                 alphaFlickKey(alpha[11]),
                 actionKeys[3]
             )
@@ -547,12 +605,15 @@ class FlickImeService : InputMethodService() {
     }
 
     private fun buildNumPanel(): View {
+        val specs = KeyMapStore.loadNumKeys(this).map {
+            DirectionalSpec(it.center, it.left, it.up, it.right, it.down, it.upLeft, it.upRight, it.downLeft, it.downRight)
+        }
         val actionKeys = buildRightActionKeys()
         val rows = listOf(
-            listOf(modeSwitchKey("☆123", Mode.NUM), inputKey("1"), inputKey("2"), inputKey("3"), actionKeys[0]),
-            listOf(modeSwitchKey("ABC", Mode.ALPHA), inputKey("4"), inputKey("5"), inputKey("6"), actionKeys[1]),
-            listOf(modeSwitchKey(currentLanguageModeLabel(), Mode.FLICK), inputKey("7"), inputKey("8"), inputKey("9"), actionKeys[2]),
-            listOf(modeSwitchKey("符号", Mode.SYMBOL), inputKey("("), inputKey("0"), inputKey(")"), actionKeys[3])
+            listOf(modeSwitchKey("☆123", Mode.NUM), symbolFlickKey(specs[0]), symbolFlickKey(specs[1]), symbolFlickKey(specs[2]), actionKeys[0]),
+            listOf(modeSwitchKey("ABC", Mode.ALPHA), symbolFlickKey(specs[3]), symbolFlickKey(specs[4]), symbolFlickKey(specs[5]), actionKeys[1]),
+            listOf(modeSwitchKey(currentLanguageModeLabel(), Mode.FLICK), symbolFlickKey(specs[6]), symbolFlickKey(specs[7]), symbolFlickKey(specs[8]), actionKeys[2]),
+            listOf(modeSwitchKey("符号", Mode.SYMBOL), symbolFlickKey(specs[9]), symbolFlickKey(specs[10]), symbolFlickKey(specs[11]), actionKeys[3])
         )
         return panelFromRows(rows)
     }
@@ -576,7 +637,7 @@ class FlickImeService : InputMethodService() {
         val actionKeys = buildRightActionKeys()
         val rows = listOf(
             listOf(modeSwitchKey("☆123", Mode.NUM), controlKey("复制") { copySelection() }, controlKey("↑") { sendArrow(KeyEvent.KEYCODE_DPAD_UP) }, controlKey("粘贴") { pasteClipboard() }, actionKeys[0]),
-            listOf(modeSwitchKey("ABC", Mode.ALPHA), controlKey("←") { sendArrow(KeyEvent.KEYCODE_DPAD_LEFT) }, controlKey("●") {}, controlKey("→") { sendArrow(KeyEvent.KEYCODE_DPAD_RIGHT) }, actionKeys[1]),
+            listOf(modeSwitchKey("ABC", Mode.ALPHA), controlKey("←") { sendArrow(KeyEvent.KEYCODE_DPAD_LEFT) }, controlKey("语音") { startVoiceInput() }, controlKey("→") { sendArrow(KeyEvent.KEYCODE_DPAD_RIGHT) }, actionKeys[1]),
             listOf(modeSwitchKey(currentLanguageModeLabel(), Mode.FLICK), controlKey("剪切") { cutSelection() }, controlKey("↓") { sendArrow(KeyEvent.KEYCODE_DPAD_DOWN) }, controlKey("全选") { selectAll() }, actionKeys[2]),
             listOf(modeSwitchKey("符号", Mode.SYMBOL), controlKey("HOME") { sendKey(KeyEvent.KEYCODE_MOVE_HOME) }, controlKey("剪贴板") { showClipboardPanel() }, controlKey("END") { sendKey(KeyEvent.KEYCODE_MOVE_END) }, actionKeys[3])
         )
@@ -587,7 +648,7 @@ class FlickImeService : InputMethodService() {
         return rightActionKeyOrder.map { key ->
             when (key) {
                 ActionKeyKind.BACKSPACE -> backspaceKey()
-                ActionKeyKind.SPACE -> spaceKey()
+                ActionKeyKind.VOICE -> voiceKey()
                 ActionKeyKind.ENTER -> primaryKey("回车") { sendEnter() }
                 ActionKeyKind.FUNC -> modeSwitchKey("功能", Mode.FUNC)
             }
@@ -911,9 +972,9 @@ class FlickImeService : InputMethodService() {
                 MotionEvent.ACTION_UP -> {
                     hideHintOverlay()
                     val out = textByDirection(spec, direction)
-                    if (out.isBlank()) return@setOnTouchListener true
+                    if (out.isEmpty()) return@setOnTouchListener true
                     playKeyClick()
-                    commitTextSafe(out)
+                    commitDirectText(out)
                     true
                 }
                 MotionEvent.ACTION_CANCEL -> {
@@ -926,7 +987,7 @@ class FlickImeService : InputMethodService() {
         return key
     }
 
-    private fun textFlickKey(spec: DirectionalSpec): View = directionalKey(spec) { commitTextSafe(it) }
+    private fun textFlickKey(spec: DirectionalSpec): View = directionalKey(spec) { commitDirectText(it) }
 
     private fun alphaFlickKey(spec: DirectionalSpec): View {
         val isLandscape = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
@@ -979,7 +1040,7 @@ class FlickImeService : InputMethodService() {
                         FlickDirection.DownRight -> spec.downRight
                         else -> spec.center
                     }
-                    if (out.isBlank()) return@setOnTouchListener true
+                    if (out.isEmpty()) return@setOnTouchListener true
                     playKeyClick()
                     commitAlphaChar(out)
                     true
@@ -1030,7 +1091,7 @@ class FlickImeService : InputMethodService() {
                 MotionEvent.ACTION_UP -> {
                     hideHintOverlay()
                     val out = textByDirection(spec, direction)
-                    if (out.isBlank()) return@setOnTouchListener true
+                    if (out.isEmpty()) return@setOnTouchListener true
                     playKeyClick()
                     commit(out)
                     true
@@ -1236,6 +1297,8 @@ class FlickImeService : InputMethodService() {
         return key
     }
 
+    private fun voiceKey(): View = primaryKey("语音") { startVoiceInput() }
+
     private fun modeSwitchKey(label: String, target: Mode): View {
         val (key, textView) = centeredLabelKey(label, 14f, Typeface.NORMAL, colorKeyText())
         key.setOnClickListener { playKeyClick(); switchMode(target) }
@@ -1332,7 +1395,7 @@ class FlickImeService : InputMethodService() {
     private fun inputKey(label: String): View {
         val (key, _) = centeredLabelKey(label, 16f, Typeface.NORMAL, colorKeyText())
         key.background = keyBackground(colorKeyBackground(), colorKeyBorder())
-        key.setOnClickListener { playKeyClick(); commitTextSafe(label) }
+        key.setOnClickListener { playKeyClick(); commitDirectText(label) }
         return key
     }
 
@@ -1523,7 +1586,7 @@ class FlickImeService : InputMethodService() {
 
     private fun onPinyinFlick(zone: KeyZone, text: String) {
         if (text.isNotEmpty() && text.isBlank()) {
-            if (commitTextSafe(text)) resetComposing()
+            onSpacePressed()
             return
         }
         if (isPunctuationToken(text)) {
@@ -1548,20 +1611,56 @@ class FlickImeService : InputMethodService() {
                     refreshCandidateViews()
                 }
             }
+            InputLanguage.SHAPE -> {
+                handleShapeFlick(text)
+                requestCandidatesAsync()
+                refreshCandidateViews()
+            }
         }
     }
 
     private fun handlePinyinFlick(zone: KeyZone, text: String) {
+        if (isPinyinSeparatorToken(text)) {
+            val pending = shengmuPart
+            if (pending != null && isPinyinInitialToken(pending)) {
+                composedSyllables += pending.lowercase(Locale.getDefault())
+                composedDisplaySyllables += pending
+                shengmuPart = null
+            }
+            composingText = buildComposingDisplay()
+            return
+        }
         // 部分音节（如 ü/v）被放到声母区时，按韵母逻辑处理，允许首音节直接输入。
         val actualZone = if (zone == KeyZone.Shengmu && isYunmuLikeToken(text)) KeyZone.Yunmu else zone
         when (actualZone) {
-            KeyZone.Shengmu -> shengmuPart = text
+            KeyZone.Shengmu -> {
+                val pending = shengmuPart
+                if (pending != null && isPinyinInitialToken(pending) && isPinyinInitialToken(text)) {
+                    composedSyllables += pending.lowercase(Locale.getDefault())
+                    composedDisplaySyllables += pending
+                }
+                shengmuPart = text
+            }
             KeyZone.Yunmu -> {
                 val full = (shengmuPart ?: "") + text
                 shengmuPart = null
                 composedSyllables += full.lowercase()
                 composedDisplaySyllables += full
             }
+        }
+        composingText = buildComposingDisplay()
+    }
+
+    private fun handleShapeFlick(text: String) {
+        val normalized = text.lowercase(Locale.getDefault()).filter { it in 'a'..'z' || it == ';' || it == '\'' }
+        if (normalized.isBlank()) {
+            if (commitTextSafe(text)) resetComposing()
+            return
+        }
+        shengmuPart = null
+        normalized.forEach {
+            composedSyllables += it.toString()
+            composedDisplaySyllables += it.toString()
         }
         composingText = buildComposingDisplay()
     }
@@ -1573,7 +1672,9 @@ class FlickImeService : InputMethodService() {
             else -> zone
         }
         when (actualZone) {
-            KeyZone.Shengmu -> shengmuPart = ZhuyinConverter.normalize(text)
+            KeyZone.Shengmu -> {
+                shengmuPart = ZhuyinConverter.normalize(text)
+            }
             KeyZone.Yunmu -> {
                 val fullZhuyin = ZhuyinConverter.normalize((shengmuPart ?: "") + text)
                 shengmuPart = null
@@ -1615,6 +1716,23 @@ class FlickImeService : InputMethodService() {
         val t = text.lowercase(Locale.getDefault())
             .replace("ü", "v")
         return t == "v" || t == "er" || t.firstOrNull() in listOf('a', 'e', 'i', 'o', 'u')
+    }
+
+    private fun isPinyinInitialToken(text: String): Boolean {
+        val normalized = text.lowercase(Locale.getDefault()).replace("ü", "v")
+        return pinyinInitialsForBackspace.contains(normalized)
+    }
+
+    private fun isPinyinSeparatorToken(text: String): Boolean {
+        return text.length == 1 && isPinyinSeparatorChar(text[0])
+    }
+
+    private fun isPinyinSeparatorChar(c: Char): Boolean {
+        return c == '\'' || c == '’' || c == '‘' || c == '＇' || c == '`' || c == '｀'
+    }
+
+    private fun isPinyinInitialSequence(parts: List<String>): Boolean {
+        return parts.isNotEmpty() && parts.all { isPinyinInitialToken(it) }
     }
 
     private fun isZhuyinYunmuLikeToken(text: String): Boolean {
@@ -1735,6 +1853,11 @@ class FlickImeService : InputMethodService() {
         val current = composedSyllables.toList()
         val currentDisplay = composedDisplaySyllables.toList()
         if (current.isEmpty()) {
+            if (candidate.replaceBeforeCursor > 0 &&
+                !withInputConnection { it.deleteSurroundingText(candidate.replaceBeforeCursor, 0) }
+            ) {
+                return
+            }
             if (commitTextSafe(candidate.text)) resetComposing()
             return
         }
@@ -1747,25 +1870,26 @@ class FlickImeService : InputMethodService() {
         if (!commitTextSafe(candidate.text)) return
 
         if (remaining.isEmpty()) {
-            if (fullQuery.isNotBlank() && fullText.isNotBlank()) {
+            if (candidate.recordChoice && fullQuery.isNotBlank() && fullText.isNotBlank()) {
                 candidateExecutor.execute {
                     runCatching {
                         if (currentInputLanguage == InputLanguage.JAPANESE) {
                             japaneseEngine.recordUserChoice(fullQuery, fullText)
-                        } else {
+                        } else if (currentInputLanguage == InputLanguage.PINYIN || currentInputLanguage == InputLanguage.ZHUYIN) {
                             pinyinEngine.recordUserChoice(fullQuery, fullText)
                         }
                     }
                 }
             }
             resetComposing()
+            refreshContextualCandidatesFromEditor()
             return
         }
 
-        if (currentInputLanguage != InputLanguage.JAPANESE && composingSessionFullQuery.isBlank()) {
+        if (currentInputLanguage != InputLanguage.JAPANESE && currentInputLanguage != InputLanguage.SHAPE && composingSessionFullQuery.isBlank()) {
             composingSessionFullQuery = current.joinToString("")
         }
-        if (currentInputLanguage != InputLanguage.JAPANESE) {
+        if (currentInputLanguage != InputLanguage.JAPANESE && currentInputLanguage != InputLanguage.SHAPE) {
             composingSessionCommittedText += candidate.text
         }
         shengmuPart = null
@@ -1797,13 +1921,16 @@ class FlickImeService : InputMethodService() {
             } else {
                 removedQuery
             }
-            shengmuPart = restorePendingInitialAfterBackspace(removedQuery, removedDisplay)
+            val restored = restorePendingInitialAfterBackspace(removedQuery, removedDisplay)
+            shengmuPart = restored
             composingText = buildComposingDisplay()
             requestCandidatesAsync()
             refreshCandidateViews()
             return
         }
-        withInputConnection { it.deleteSurroundingText(1, 0) }
+        if (withInputConnection { it.deleteSurroundingText(1, 0) }) {
+            refreshContextualCandidatesFromEditor()
+        }
     }
 
     private fun restorePendingInitialAfterBackspace(removedQuery: String, removedDisplay: String): String? {
@@ -1814,6 +1941,7 @@ class FlickImeService : InputMethodService() {
             }
             InputLanguage.ZHUYIN -> extractZhuyinInitial(removedDisplay)
             InputLanguage.JAPANESE -> null
+            InputLanguage.SHAPE -> null
         }
     }
 
@@ -1839,7 +1967,7 @@ class FlickImeService : InputMethodService() {
     }
 
     private fun onSpacePressed() {
-        if (allCandidates.isNotEmpty()) {
+        if (allCandidates.isNotEmpty() && buildRawDisplayForCommit().isNotBlank()) {
             commitCandidate(allCandidates.first())
             return
         }
@@ -1856,9 +1984,10 @@ class FlickImeService : InputMethodService() {
                 }
             }
             resetComposing()
+            refreshContextualCandidatesFromEditor()
             return
         }
-        commitTextSafe(" ")
+        commitDirectText(" ")
     }
 
     private fun sendEnter() {
@@ -1875,6 +2004,7 @@ class FlickImeService : InputMethodService() {
                 }
             }
             resetComposing()
+            refreshContextualCandidatesFromEditor()
             return
         }
         withInputConnection {
@@ -1922,7 +2052,7 @@ class FlickImeService : InputMethodService() {
     private fun pasteClipboard() {
         val cm = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         val text = cm.primaryClip?.getItemAt(0)?.coerceToText(this)?.toString().orEmpty()
-        if (text.isNotEmpty()) commitTextSafe(text)
+        if (text.isNotEmpty()) commitDirectText(text)
     }
 
     private fun showClipboardPanel() {
@@ -1930,6 +2060,252 @@ class FlickImeService : InputMethodService() {
         captureSystemClipboard()
         refreshClipboardPanel()
         switchMode(Mode.CLIPBOARD)
+    }
+
+    private fun startVoiceInput() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M &&
+            checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED
+        ) {
+            Toast.makeText(this, "请先在 CNflick 设置里授予录音权限", Toast.LENGTH_SHORT).show()
+            openImeSettings()
+            return
+        }
+        if (voiceListening) {
+            stopSenseVoiceRecording(recognize = true)
+            return
+        }
+        if (senseVoiceRecognizer != null) {
+            beginSenseVoiceRecording()
+            return
+        }
+        if (senseVoiceLoading) {
+            Toast.makeText(this, "SenseVoice 模型正在加载", Toast.LENGTH_SHORT).show()
+            return
+        }
+        loadSenseVoiceAndStart()
+    }
+
+    private fun loadSenseVoiceAndStart() {
+        senseVoiceLoading = true
+        resetComposing()
+        composingText = "SenseVoice 模型正在加载"
+        refreshCandidateViews()
+        voiceExecutor.execute {
+            val result = runCatching { createSenseVoiceRecognizer() }
+            mainHandler.post {
+                senseVoiceLoading = false
+                val recognizer = result.getOrNull()
+                if (recognizer == null) {
+                    resetComposing()
+                    Toast.makeText(
+                        this@FlickImeService,
+                        "SenseVoice 模型加载失败：${result.exceptionOrNull()?.message.orEmpty()}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                    return@post
+                }
+                senseVoiceRecognizer = recognizer
+                beginSenseVoiceRecording()
+            }
+        }
+    }
+
+    private fun createSenseVoiceRecognizer(): OfflineRecognizer {
+        val senseVoice = OfflineSenseVoiceModelConfig().apply {
+            model = "sense-voice/model.int8.onnx"
+            language = "zh"
+            useInverseTextNormalization = true
+        }
+        val modelConfig = OfflineModelConfig().apply {
+            this.senseVoice = senseVoice
+            tokens = "sense-voice/tokens.txt"
+            numThreads = 2
+            debug = false
+            provider = "cpu"
+        }
+        val config = OfflineRecognizerConfig().apply {
+            featConfig = FeatureConfig(sampleRate = VOICE_SAMPLE_RATE, featureDim = 80, dither = 0.0f)
+            this.modelConfig = modelConfig
+        }
+        return OfflineRecognizer(assets, config)
+    }
+
+    private fun beginSenseVoiceRecording() {
+        resetComposing()
+        val minBuffer = AudioRecord.getMinBufferSize(
+            VOICE_SAMPLE_RATE,
+            AudioFormat.CHANNEL_IN_MONO,
+            AudioFormat.ENCODING_PCM_16BIT
+        )
+        if (minBuffer <= 0) {
+            Toast.makeText(this, "无法启动录音", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val record = try {
+            @Suppress("MissingPermission")
+            AudioRecord(
+                MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                VOICE_SAMPLE_RATE,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
+                minBuffer * 2
+            )
+        } catch (t: Throwable) {
+            Toast.makeText(this, "无法启动录音：${t.message.orEmpty()}", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (record.state != AudioRecord.STATE_INITIALIZED) {
+            record.release()
+            Toast.makeText(this, "录音设备初始化失败", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val audioBytes = ByteArrayOutputStream()
+        voiceAudioRecord = record
+        voiceAudioBytes = audioBytes
+        voiceListening = true
+        composingText = "正在听写，点语音结束"
+        refreshCandidateViews()
+
+        try {
+            record.startRecording()
+        } catch (t: Throwable) {
+            voiceListening = false
+            voiceAudioRecord = null
+            voiceAudioBytes = null
+            record.release()
+            resetComposing()
+            Toast.makeText(this, "录音启动失败：${t.message.orEmpty()}", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        val bufferSize = (minBuffer / 2).coerceAtLeast(1024)
+        voiceRecordingThread = Thread {
+            val buffer = ShortArray(bufferSize)
+            while (voiceListening && !Thread.currentThread().isInterrupted) {
+                val read = runCatching { record.read(buffer, 0, buffer.size) }.getOrDefault(0)
+                if (read <= 0) continue
+                synchronized(audioBytes) {
+                    for (i in 0 until read) {
+                        val sample = buffer[i].toInt()
+                        audioBytes.write(sample and 0xff)
+                        audioBytes.write((sample shr 8) and 0xff)
+                    }
+                }
+            }
+        }.apply {
+            name = "CNflick-SenseVoiceRecorder"
+            start()
+        }
+    }
+
+    private fun stopSenseVoiceRecording(recognize: Boolean) {
+        val record = voiceAudioRecord
+        val bytes = voiceAudioBytes
+        voiceListening = false
+        voiceAudioRecord = null
+        voiceAudioBytes = null
+        voiceRecordingThread?.interrupt()
+        voiceRecordingThread = null
+        if (record != null) {
+            runCatching { record.stop() }
+            runCatching { record.release() }
+        }
+        if (!recognize) {
+            resetComposing()
+            return
+        }
+        val data = synchronized(bytes ?: ByteArrayOutputStream()) {
+            bytes?.toByteArray() ?: ByteArray(0)
+        }
+        if (data.size < VOICE_SAMPLE_RATE / 2) {
+            resetComposing()
+            Toast.makeText(this, "录音太短", Toast.LENGTH_SHORT).show()
+            return
+        }
+        composingText = "正在识别..."
+        refreshCandidateViews()
+        voiceExecutor.execute {
+            val result = runCatching { recognizeSenseVoice(data) }
+            mainHandler.post {
+                resetComposing()
+                val text = result.getOrDefault("")
+                if (text.isNotBlank()) {
+                    commitVoiceText(text)
+                } else {
+                    Toast.makeText(
+                        this@FlickImeService,
+                        "没有识别到内容${result.exceptionOrNull()?.message?.let { "：$it" }.orEmpty()}",
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        }
+    }
+
+    private fun recognizeSenseVoice(pcm16le: ByteArray): String {
+        val recognizer = senseVoiceRecognizer ?: return ""
+        val samples = FloatArray(pcm16le.size / 2)
+        var byteIndex = 0
+        for (i in samples.indices) {
+            val lo = pcm16le[byteIndex].toInt() and 0xff
+            val hi = pcm16le[byteIndex + 1].toInt()
+            val sample = (hi shl 8) or lo
+            samples[i] = sample.coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()) / 32768.0f
+            byteIndex += 2
+        }
+        val stream = recognizer.createStream()
+        return try {
+            stream.acceptWaveform(samples, VOICE_SAMPLE_RATE)
+            recognizer.decode(stream)
+            normalizeVoiceText(recognizer.getResult(stream).text)
+        } finally {
+            stream.release()
+        }
+    }
+
+    private fun commitVoiceText(text: String) {
+        val finalText = punctuateVoiceText(text)
+        if (finalText.isBlank()) {
+            refreshCandidateViews()
+            return
+        }
+        commitDirectText(finalText)
+    }
+
+    private fun normalizeVoiceText(text: String): String {
+        val trimmed = text.trim()
+        if (trimmed.isBlank()) return ""
+        val noSpaces = if (trimmed.any { it in '\u4E00'..'\u9FFF' }) {
+            trimmed.replace(" ", "")
+        } else {
+            trimmed
+        }
+        return replaceSpokenPunctuation(noSpaces)
+    }
+
+    private fun replaceSpokenPunctuation(text: String): String {
+        return text
+            .replace("逗号", "，")
+            .replace("顿号", "、")
+            .replace("句号", "。")
+            .replace("问号", "？")
+            .replace("感叹号", "！")
+            .replace("叹号", "！")
+            .replace("冒号", "：")
+            .replace("分号", "；")
+            .replace("换行", "\n")
+    }
+
+    private fun punctuateVoiceText(text: String): String {
+        val trimmed = text.trim()
+        if (trimmed.isBlank()) return ""
+        if (trimmed.last() in setOf('。', '，', '、', '？', '！', '；', '：', '.', ',', '?', '!', ';', ':', '\n')) {
+            return trimmed
+        }
+        if (!trimmed.any { it in '\u4E00'..'\u9FFF' }) return "$trimmed."
+        val questionEndings = listOf("吗", "么", "呢", "嘛", "是不是", "对不对", "好不好", "行不行", "可以吗")
+        return trimmed + if (questionEndings.any { trimmed.endsWith(it) }) "？" else "。"
     }
 
     private fun captureSystemClipboard() {
@@ -1970,7 +2346,7 @@ class FlickImeService : InputMethodService() {
                 setPadding(dp(10), dp(10), dp(10), dp(10))
                 background = keyBackground(colorKeyBackground(), colorKeyBorder())
                 setOnClickListener {
-                    commitTextSafe(item)
+                    commitDirectText(item)
                     switchMode(Mode.FUNC)
                 }
             }
@@ -2005,7 +2381,7 @@ class FlickImeService : InputMethodService() {
 
     private fun loadLanguagePrefs() {
         val enabled = UiPrefs.getEnabledInputLanguages(this).ifEmpty { setOf(InputLanguage.PINYIN) }
-        enabledInputLanguages = listOf(InputLanguage.PINYIN, InputLanguage.ZHUYIN, InputLanguage.JAPANESE)
+        enabledInputLanguages = listOf(InputLanguage.PINYIN, InputLanguage.ZHUYIN, InputLanguage.JAPANESE, InputLanguage.SHAPE)
             .filter { enabled.contains(it) }
             .ifEmpty { listOf(InputLanguage.PINYIN) }
         val current = UiPrefs.getCurrentInputLanguage(this)
@@ -2020,6 +2396,25 @@ class FlickImeService : InputMethodService() {
             InputLanguage.PINYIN -> KeyMapStore.loadPinyinKeys(this)
             InputLanguage.ZHUYIN -> KeyMapStore.loadZhuyinKeys(this)
             InputLanguage.JAPANESE -> KeyMapStore.loadJapaneseKeys(this)
+            InputLanguage.SHAPE -> loadShapeKeys()
+        }
+    }
+
+    private fun loadShapeKeys(): List<FlickKeySpec> {
+        return KeyMapStore.loadAlphaKeys(this).map {
+            val center = if (it.center.contains("大写锁定") || it.center == "⇧") "" else it.center
+            FlickKeySpec(
+                center = center,
+                left = it.left,
+                up = it.up,
+                right = it.right,
+                down = it.down,
+                upLeft = it.upLeft,
+                upRight = it.upRight,
+                downLeft = it.downLeft,
+                downRight = it.downRight,
+                zone = KeyZone.Shengmu
+            )
         }
     }
 
@@ -2028,6 +2423,7 @@ class FlickImeService : InputMethodService() {
             InputLanguage.PINYIN -> "拼音"
             InputLanguage.ZHUYIN -> "注音"
             InputLanguage.JAPANESE -> "かな"
+            InputLanguage.SHAPE -> "五笔"
         }
     }
 
@@ -2036,6 +2432,7 @@ class FlickImeService : InputMethodService() {
             InputLanguage.PINYIN -> "拼音"
             InputLanguage.ZHUYIN -> "注音"
             InputLanguage.JAPANESE -> "かな"
+            InputLanguage.SHAPE -> "五笔/形码"
         }
     }
 
@@ -2084,6 +2481,12 @@ class FlickImeService : InputMethodService() {
         }
     }
 
+    private fun commitDirectText(text: String): Boolean {
+        val committed = commitTextSafe(text)
+        if (committed) refreshContextualCandidatesFromEditor()
+        return committed
+    }
+
     private fun commitTextSafe(text: String): Boolean {
         if (text.isEmpty()) return true
         return withInputConnection { it.commitText(text, 1) }
@@ -2113,22 +2516,64 @@ class FlickImeService : InputMethodService() {
         }
     }
 
-    private fun computeCandidates(query: String, syllables: List<String>): List<CandidateEntry> {
+    private fun computeCandidates(
+        query: String,
+        syllables: List<String>
+    ): List<CandidateEntry> {
         if (query.isBlank()) return emptyList()
         return try {
-            when (currentInputLanguage) {
+            val base = when (currentInputLanguage) {
                 InputLanguage.JAPANESE -> computeJapaneseCandidates(syllables)
+                InputLanguage.SHAPE -> ShapeCodeManager.queryCandidates(this, query, 48)
+                    .map { CandidateEntry(it, syllables.size.coerceAtLeast(1)) }
                 else -> {
-                    if (syllables.size <= 1) {
+                    if (currentInputLanguage == InputLanguage.PINYIN && isPinyinInitialSequence(syllables)) {
+                        pinyinEngine.queryInitialCandidates(syllables, 48)
+                            .map { CandidateEntry(it, syllables.size, recordChoice = false) }
+                    } else if (syllables.size <= 1) {
                         pinyinEngine.queryCandidates(query, 48).map { CandidateEntry(it, 1) }
                     } else {
                         computeMultiSyllableCandidates(syllables)
                     }
                 }
             }
+            mergeSpecialCandidates(base, timeCandidatesForQuery(query, syllables))
         } catch (_: Throwable) {
             emptyList()
         }
+    }
+
+    private fun mergeSpecialCandidates(
+        base: List<CandidateEntry>,
+        special: List<CandidateEntry>
+    ): List<CandidateEntry> {
+        if (special.isEmpty()) return base
+        val out = ArrayList<CandidateEntry>(base.size + special.size)
+        fun add(candidate: CandidateEntry) {
+            if (candidate.text.isBlank()) return
+            if (out.none { it.text == candidate.text }) out += candidate
+        }
+        base.firstOrNull()?.let(::add)
+        special.forEach(::add)
+        base.drop(1).forEach(::add)
+        return out.take(48)
+    }
+
+    private fun timeCandidatesForQuery(query: String, syllables: List<String>): List<CandidateEntry> {
+        if (currentInputLanguage != InputLanguage.PINYIN && currentInputLanguage != InputLanguage.ZHUYIN) {
+            return emptyList()
+        }
+        val normalized = query.lowercase(Locale.getDefault()).replace("'", "")
+        val matched = normalized in setOf(
+            "shijian",
+            "riqi",
+            "jintian",
+            "xianzai",
+            "jidian"
+        )
+        if (!matched) return emptyList()
+        val consume = syllables.size.coerceAtLeast(1)
+        return currentTimeCandidateTexts().map { CandidateEntry(it, consume, recordChoice = false) }
     }
 
     private fun computeJapaneseCandidates(syllables: List<String>): List<CandidateEntry> {
@@ -2311,11 +2756,11 @@ class FlickImeService : InputMethodService() {
     }
 
     private fun requestCandidatesAsync() {
-        val query = buildQueryForCandidates()
-        val syllablesSnapshot = composedSyllables.toList()
+        val syllablesSnapshot = buildSyllablesForCandidates()
+        val query = syllablesSnapshot.joinToString("")
         val token = candidateToken.incrementAndGet()
         if (query.isBlank()) {
-            allCandidates = emptyList()
+            allCandidates = buildContextualCandidatesFromEditor()
             refreshCandidateViews()
             return
         }
@@ -2330,10 +2775,194 @@ class FlickImeService : InputMethodService() {
         }
     }
 
-    private fun buildQueryForCandidates(): String = composedSyllables.joinToString("")
+    private fun refreshContextualCandidatesFromEditor() {
+        if (!canShowContextualCandidates()) return
+        candidateToken.incrementAndGet()
+        allCandidates = buildContextualCandidatesFromEditor()
+        refreshCandidateViews()
+    }
+
+    private fun canShowContextualCandidates(): Boolean {
+        return shengmuPart == null &&
+            composedSyllables.isEmpty() &&
+            composedDisplaySyllables.isEmpty() &&
+            composingText.isBlank() &&
+            !voiceListening
+    }
+
+    private fun buildContextualCandidatesFromEditor(): List<CandidateEntry> {
+        if (!canShowContextualCandidates()) return emptyList()
+        val before = currentInputConnection
+            ?.getTextBeforeCursor(80, 0)
+            ?.toString()
+            .orEmpty()
+        if (before.isBlank()) return emptyList()
+
+        val out = ArrayList<CandidateEntry>(8)
+        out += buildInitialContextCandidates(before)
+        evaluateMathExpressionBeforeCursor(before)?.let { out += CandidateEntry(it, 0, recordChoice = false) }
+        if (hasTimeContextTrigger(before)) {
+            currentTimeCandidateTexts().forEach { out += CandidateEntry(it, 0, recordChoice = false) }
+        }
+        return out.distinctBy { it.text }.take(12)
+    }
+
+    private fun buildInitialContextCandidates(before: String): List<CandidateEntry> {
+        if (currentInputLanguage != InputLanguage.PINYIN || mode == Mode.ALPHA) return emptyList()
+        val query = extractInitialContextQuery(before) ?: return emptyList()
+        return pinyinEngine.queryInitialCandidates(query.tokens, 12)
+            .filter { it.isNotBlank() }
+            .map {
+                CandidateEntry(
+                    text = it,
+                    consumeSyllables = 0,
+                    recordChoice = false,
+                    replaceBeforeCursor = query.typedLength
+                )
+            }
+    }
+
+    private fun extractInitialContextQuery(before: String): InitialContextQuery? {
+        var start = before.length
+        while (start > 0 && isInitialContextChar(before[start - 1])) {
+            start -= 1
+        }
+        if (start == before.length) return null
+
+        val suffix = before.substring(start)
+        if (suffix.length > 12) return null
+        val normalized = suffix.lowercase(Locale.getDefault())
+        val tokens = parseInitialContextTokens(normalized) ?: return null
+        if (tokens.isEmpty() || tokens.size > 8) return null
+        return InitialContextQuery(suffix.length, tokens)
+    }
+
+    private fun isInitialContextChar(c: Char): Boolean {
+        return c in 'a'..'z' || c in 'A'..'Z' || isPinyinSeparatorChar(c)
+    }
+
+    private fun parseInitialContextTokens(text: String): List<String>? {
+        if (text.isBlank()) return null
+        val normalized = text.lowercase(Locale.getDefault())
+        return if (normalized.any(::isPinyinSeparatorChar)) {
+            val out = mutableListOf<String>()
+            normalized
+                .splitToSequence(*pinyinSeparatorCharsArray)
+                .filter { it.isNotBlank() }
+                .forEach { segment ->
+                    val parsed = parseInitialSegment(segment) ?: return null
+                    out += parsed
+                }
+            out.takeIf { it.isNotEmpty() }
+        } else {
+            parseInitialSegment(normalized)
+        }
+    }
+
+    private fun parseInitialSegment(segment: String): List<String>? {
+        if (segment.isBlank()) return null
+        val out = mutableListOf<String>()
+        var index = 0
+        while (index < segment.length) {
+            val remaining = segment.substring(index)
+            val token = when {
+                remaining.startsWith("zh") -> "zh"
+                remaining.startsWith("ch") -> "ch"
+                remaining.startsWith("sh") -> "sh"
+                else -> remaining.first().toString()
+            }
+            if (!isPinyinInitialToken(token)) return null
+            out += token
+            index += token.length
+        }
+        return out
+    }
+
+    private fun evaluateMathExpressionBeforeCursor(before: String): String? {
+        if (before.isEmpty() || before.last().isWhitespace()) return null
+        val expr = extractMathExpressionSuffix(before) ?: return null
+        val normalized = expr
+            .replace('＋', '+')
+            .replace('－', '-')
+            .replace('×', '*')
+            .replace('÷', '/')
+            .replace('（', '(')
+            .replace('）', ')')
+        if (!normalized.any { it == '+' || it == '-' || it == '*' || it == '/' }) return null
+        if (normalized.trimEnd().lastOrNull() in setOf('+', '-', '*', '/', '.')) return null
+        val value = MathExpressionParser(normalized).parse() ?: return null
+        return formatMathResult(value)
+    }
+
+    private fun extractMathExpressionSuffix(before: String): String? {
+        var start = before.length
+        while (start > 0) {
+            val c = before[start - 1]
+            val allowed = c.isDigit() ||
+                c == '.' ||
+                c == '+' || c == '-' || c == '*' || c == '/' || c == '×' || c == '÷' ||
+                c == '＋' || c == '－' ||
+                c == '(' || c == ')' || c == '（' || c == '）' ||
+                c.isWhitespace()
+            if (!allowed) break
+            start -= 1
+        }
+        val expr = before.substring(start).trim()
+        if (expr.length < 3) return null
+        if (expr.none { it.isDigit() }) return null
+        return expr
+    }
+
+    private fun formatMathResult(value: Double): String? {
+        if (!value.isFinite()) return null
+        val rounded = kotlin.math.round(value)
+        if (abs(value - rounded) < 1e-9) {
+            return rounded.toLong().toString()
+        }
+        return BigDecimal.valueOf(value)
+            .setScale(10, RoundingMode.HALF_UP)
+            .stripTrailingZeros()
+            .toPlainString()
+            .take(18)
+            .trimEnd('.')
+            .takeIf { it.isNotBlank() }
+    }
+
+    private fun hasTimeContextTrigger(before: String): Boolean {
+        val trimmed = before.trimEnd()
+        if (trimmed.isBlank()) return false
+        val lower = trimmed.lowercase(Locale.getDefault())
+        return listOf("时间", "现在", "日期", "今天", "几点", "几点了", "time", "date", "now")
+            .any { lower.endsWith(it) }
+    }
+
+    private fun currentTimeCandidateTexts(): List<String> {
+        val now = LocalDateTime.now()
+        val locale = Locale.CHINA
+        return listOf(
+            now.format(DateTimeFormatter.ofPattern("HH:mm", locale)),
+            now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm", locale)),
+            now.format(DateTimeFormatter.ofPattern("yyyy年M月d日 HH:mm", locale)),
+            now.format(DateTimeFormatter.ofPattern("yyyy-MM-dd", locale))
+        ).distinct()
+    }
+
+    private fun buildSyllablesForCandidates(): List<String> {
+        val pending = shengmuPart.orEmpty()
+        if (currentInputLanguage == InputLanguage.PINYIN &&
+            pending.isNotBlank() &&
+            isPinyinInitialToken(pending)
+        ) {
+            if (composedSyllables.isEmpty()) return listOf(pending.lowercase(Locale.getDefault()))
+            if (isPinyinInitialSequence(composedSyllables)) {
+                return composedSyllables + pending.lowercase(Locale.getDefault())
+            }
+        }
+        return composedSyllables.toList()
+    }
 
     private fun buildComposingDisplay(): String {
-        val sep = if (currentInputLanguage == InputLanguage.JAPANESE) "" else "'"
+        val sep = if (currentInputLanguage == InputLanguage.JAPANESE || currentInputLanguage == InputLanguage.SHAPE) "" else "'"
         val base = composedDisplaySyllables.joinToString(sep)
         val pending = shengmuPart.orEmpty()
         if (pending.isBlank()) return base
@@ -2347,6 +2976,7 @@ class FlickImeService : InputMethodService() {
             InputLanguage.PINYIN -> if (pending.isBlank()) base else base + pending
             InputLanguage.ZHUYIN -> if (pending.isBlank()) base else base + ZhuyinConverter.toPinyin(pending)
             InputLanguage.JAPANESE -> base
+            InputLanguage.SHAPE -> base
         }
     }
 
@@ -2357,11 +2987,109 @@ class FlickImeService : InputMethodService() {
             InputLanguage.PINYIN -> buildRawQueryForCommit()
             InputLanguage.ZHUYIN -> if (pending.isBlank()) base else base + pending
             InputLanguage.JAPANESE -> base
+            InputLanguage.SHAPE -> base
+        }
+    }
+
+    private class MathExpressionParser(private val source: String) {
+        private var index = 0
+
+        fun parse(): Double? {
+            return try {
+                val value = parseExpression()
+                skipSpaces()
+                if (index == source.length) value else null
+            } catch (_: ArithmeticException) {
+                null
+            } catch (_: NumberFormatException) {
+                null
+            } catch (_: IllegalArgumentException) {
+                null
+            }
+        }
+
+        private fun parseExpression(): Double {
+            var value = parseTerm()
+            while (true) {
+                skipSpaces()
+                value = when {
+                    match('+') -> value + parseTerm()
+                    match('-') -> value - parseTerm()
+                    else -> return value
+                }
+            }
+        }
+
+        private fun parseTerm(): Double {
+            var value = parseFactor()
+            while (true) {
+                skipSpaces()
+                value = when {
+                    match('*') -> value * parseFactor()
+                    match('/') -> {
+                        val divisor = parseFactor()
+                        if (abs(divisor) < 1e-12) throw ArithmeticException("divide by zero")
+                        value / divisor
+                    }
+                    else -> return value
+                }
+            }
+        }
+
+        private fun parseFactor(): Double {
+            skipSpaces()
+            if (match('+')) return parseFactor()
+            if (match('-')) return -parseFactor()
+            if (match('(')) {
+                val value = parseExpression()
+                skipSpaces()
+                if (!match(')')) throw IllegalArgumentException("missing closing parenthesis")
+                return value
+            }
+            return parseNumber()
+        }
+
+        private fun parseNumber(): Double {
+            skipSpaces()
+            val start = index
+            var dotSeen = false
+            while (index < source.length) {
+                val c = source[index]
+                when {
+                    c.isDigit() -> index += 1
+                    c == '.' && !dotSeen -> {
+                        dotSeen = true
+                        index += 1
+                    }
+                    else -> break
+                }
+            }
+            if (start == index) throw NumberFormatException("number expected")
+            return source.substring(start, index).toDouble()
+        }
+
+        private fun match(c: Char): Boolean {
+            if (index >= source.length || source[index] != c) return false
+            index += 1
+            return true
+        }
+
+        private fun skipSpaces() {
+            while (index < source.length && source[index].isWhitespace()) index += 1
         }
     }
 
     private fun dp(v: Int): Int = (v * resources.displayMetrics.density).toInt()
     private fun dpf(v: Float): Int = (v * resources.displayMetrics.density).toInt()
+
+    private fun navigationBarBottomInset(insets: WindowInsets): Int {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            insets.getInsets(WindowInsets.Type.navigationBars()).bottom
+        } else {
+            @Suppress("DEPRECATION")
+            insets.systemWindowInsetBottom
+        }
+    }
 
     private fun displayLabel(text: String): String {
         val hasAsciiLetter = text.any { it in 'a'..'z' || it in 'A'..'Z' }
@@ -2414,11 +3142,15 @@ class FlickImeService : InputMethodService() {
     }
 
     private fun commitAlphaChar(ch: String) {
+        if (ch == "大写锁定" || ch == "⇧") {
+            toggleAlphaCaps()
+            return
+        }
         if (ch.length == 1 && ch[0].isLetter()) {
             val out = if (alphaCapsLock) ch.uppercase() else ch.lowercase()
-            commitTextSafe(out)
+            commitDirectText(out)
         } else {
-            commitTextSafe(ch)
+            commitDirectText(ch)
         }
     }
 
@@ -2460,7 +3192,7 @@ class FlickImeService : InputMethodService() {
         if (parsed.size == 4) return parsed
         return listOf(
             ActionKeyKind.BACKSPACE,
-            ActionKeyKind.SPACE,
+            ActionKeyKind.VOICE,
             ActionKeyKind.FUNC,
             ActionKeyKind.ENTER
         )
@@ -2469,7 +3201,7 @@ class FlickImeService : InputMethodService() {
     private fun actionKeyKindFromPref(raw: String): ActionKeyKind? {
         return when (raw) {
             UiPrefs.ACTION_KEY_BACKSPACE -> ActionKeyKind.BACKSPACE
-            UiPrefs.ACTION_KEY_SPACE -> ActionKeyKind.SPACE
+            UiPrefs.ACTION_KEY_SPACE, UiPrefs.ACTION_KEY_VOICE -> ActionKeyKind.VOICE
             UiPrefs.ACTION_KEY_ENTER -> ActionKeyKind.ENTER
             UiPrefs.ACTION_KEY_FUNC -> ActionKeyKind.FUNC
             else -> null

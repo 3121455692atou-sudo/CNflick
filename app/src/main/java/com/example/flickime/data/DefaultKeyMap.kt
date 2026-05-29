@@ -19,7 +19,7 @@ object DefaultKeyMap {
         FlickKeySpec(center = "i", left = "ie", up = "in", right = "ing", down = "iu", zone = KeyZone.Yunmu),
         FlickKeySpec(center = "ia", left = "iong", up = "ian", right = "iang", down = "iao", zone = KeyZone.Yunmu),
         FlickKeySpec(center = "u", left = "ui", up = "un", right = "ong", down = "uo", zone = KeyZone.Yunmu),
-        FlickKeySpec(center = "ua", left = "uai", up = "uan", right = "uang", down = "o", zone = KeyZone.Yunmu),
-        FlickKeySpec(center = "。", left = "，", up = "ue", right = "ve", down = "er", zone = KeyZone.Yunmu)
+        FlickKeySpec(center = " ", left = "uai", up = "uan", right = "uang", down = "o", zone = KeyZone.Yunmu),
+        FlickKeySpec(center = "ua", left = "，", up = "ue", right = "ve", down = "er", zone = KeyZone.Yunmu)
     )
 }

@@ -33,6 +33,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.flickime.engine.JapaneseLexiconManager
 import com.example.flickime.engine.LexiconManager
+import com.example.flickime.engine.ShapeCodeManager
 import com.example.flickime.engine.ShortcutEntry
 import com.example.flickime.engine.ShortcutManager
 
@@ -43,7 +44,7 @@ class LexiconSettingsActivity : ComponentActivity() {
     }
 }
 
-private enum class LexiconSettingsPage { ROOT, CHINESE, JAPANESE }
+private enum class LexiconSettingsPage { ROOT, CHINESE, JAPANESE, SHAPE }
 
 @Composable
 private fun LexiconSettingsScreen() {
@@ -56,6 +57,8 @@ private fun LexiconSettingsScreen() {
 
     var jpAllLexicons by remember { mutableStateOf(JapaneseLexiconManager.getAllLexicons(context)) }
     var jpEnabledIds by remember { mutableStateOf(JapaneseLexiconManager.getEnabledLexiconIds(context)) }
+    var shapeTables by remember { mutableStateOf(ShapeCodeManager.getAllTables(context)) }
+    var shapeEnabledIds by remember { mutableStateOf(ShapeCodeManager.getEnabledTableIds(context)) }
 
     var shortcuts by remember { mutableStateOf(ShortcutManager.getAll(context)) }
     var shortcutCode by remember { mutableStateOf("") }
@@ -69,6 +72,11 @@ private fun LexiconSettingsScreen() {
     fun refreshJapaneseLexicons() {
         jpAllLexicons = JapaneseLexiconManager.getAllLexicons(context)
         jpEnabledIds = JapaneseLexiconManager.getEnabledLexiconIds(context)
+    }
+
+    fun refreshShapeTables() {
+        shapeTables = ShapeCodeManager.getAllTables(context)
+        shapeEnabledIds = ShapeCodeManager.getEnabledTableIds(context)
     }
 
     fun refreshShortcuts() {
@@ -99,6 +107,18 @@ private fun LexiconSettingsScreen() {
             }
     }
 
+    val shapeTablePicker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        runCatching { ShapeCodeManager.importTable(context, uri) }
+            .onSuccess {
+                refreshShapeTables()
+                Toast.makeText(context, "形码码表已导入并启用", Toast.LENGTH_SHORT).show()
+            }
+            .onFailure {
+                Toast.makeText(context, "形码码表导入失败：${it.message}", Toast.LENGTH_SHORT).show()
+            }
+    }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -117,6 +137,9 @@ private fun LexiconSettingsScreen() {
                 }
                 Button(onClick = { page = LexiconSettingsPage.JAPANESE }, modifier = Modifier.fillMaxWidth()) {
                     Text("日语词库设置（假名单独）")
+                }
+                Button(onClick = { page = LexiconSettingsPage.SHAPE }, modifier = Modifier.fillMaxWidth()) {
+                    Text("形码/五笔/声笔码表设置")
                 }
                 OutlinedButton(onClick = { (context as? Activity)?.finish() }, modifier = Modifier.fillMaxWidth()) {
                     Text("返回")
@@ -247,6 +270,46 @@ private fun LexiconSettingsScreen() {
                     jpEnabledIds = JapaneseLexiconManager.getEnabledLexiconIds(context)
                     Toast.makeText(context, "日语词库开关已恢复默认", Toast.LENGTH_SHORT).show()
                 }, modifier = Modifier.fillMaxWidth()) { Text("恢复默认日语词库开关") }
+
+                OutlinedButton(onClick = { page = LexiconSettingsPage.ROOT }, modifier = Modifier.fillMaxWidth()) { Text("返回") }
+            }
+
+            LexiconSettingsPage.SHAPE -> {
+                Text("形码码表管理", fontSize = 22.sp)
+                Text("内置五笔86。声笔系列或其它形码可导入 TXT/TSV/Rime YAML 码表。")
+
+                Button(
+                    onClick = { shapeTablePicker.launch(arrayOf("application/json", "text/*", "*/*")) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("导入形码/声笔码表")
+                }
+
+                shapeTables.forEach { table ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(Color.White)
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        val label = if (table.isBuiltIn) "${table.name}（内置）" else table.name
+                        Text(label, modifier = Modifier.weight(1f))
+                        Switch(
+                            checked = shapeEnabledIds.contains(table.id),
+                            onCheckedChange = { checked ->
+                                ShapeCodeManager.setTableEnabled(context, table.id, checked)
+                                shapeEnabledIds = ShapeCodeManager.getEnabledTableIds(context)
+                            }
+                        )
+                    }
+                }
+
+                OutlinedButton(onClick = {
+                    ShapeCodeManager.resetToDefault(context)
+                    refreshShapeTables()
+                    Toast.makeText(context, "形码码表已恢复默认", Toast.LENGTH_SHORT).show()
+                }, modifier = Modifier.fillMaxWidth()) { Text("恢复默认形码码表") }
 
                 OutlinedButton(onClick = { page = LexiconSettingsPage.ROOT }, modifier = Modifier.fillMaxWidth()) { Text("返回") }
             }

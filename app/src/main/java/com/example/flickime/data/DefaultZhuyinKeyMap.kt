@@ -20,7 +20,7 @@ object DefaultZhuyinKeyMap {
         FlickKeySpec(center = "ㄢ", left = "ㄤ", up = "ㄣ", right = "ㄥ", down = "ㄦ", zone = KeyZone.Yunmu),
         FlickKeySpec(center = "ㄞ", left = "ㄠ", up = "ㄟ", right = "ㄡ", down = "", zone = KeyZone.Yunmu),
         FlickKeySpec(center = "ㄧㄚ", left = "ㄧㄠ", up = "ㄧㄝ", right = "ㄧㄡ", down = "ㄧㄢ", zone = KeyZone.Yunmu),
-        FlickKeySpec(center = "ㄧㄣ", left = "ㄧㄥ", up = "ㄧㄤ", right = "", down = "", zone = KeyZone.Yunmu),
+        FlickKeySpec(center = " ", left = "ㄧㄥ", up = "ㄧㄤ", right = "", down = "ㄧㄣ", zone = KeyZone.Yunmu),
         FlickKeySpec(center = "ㄨㄚ", left = "ㄨㄞ", up = "ㄨㄛ", right = "ㄨㄟ", down = "ㄨㄢ", zone = KeyZone.Yunmu)
     )
 }

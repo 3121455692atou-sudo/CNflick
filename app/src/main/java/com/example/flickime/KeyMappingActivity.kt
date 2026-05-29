@@ -34,12 +34,14 @@ import androidx.compose.ui.unit.sp
 import com.example.flickime.data.DefaultAlphaKeyMap
 import com.example.flickime.data.DefaultJapaneseKeyMap
 import com.example.flickime.data.DefaultKeyMap
+import com.example.flickime.data.DefaultNumKeyMap
 import com.example.flickime.data.DefaultSymbolMap
 import com.example.flickime.data.DefaultZhuyinKeyMap
 import com.example.flickime.data.KeyMapStore
 import com.example.flickime.data.MessageEaseAlphaKeyMap
 import com.example.flickime.model.DirectionalKeySpec
 import com.example.flickime.model.FlickKeySpec
+import com.example.flickime.model.KeyZone
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -50,7 +52,7 @@ class KeyMappingActivity : ComponentActivity() {
     }
 }
 
-private enum class MappingType { PINYIN, ZHUYIN, JAPANESE, SYMBOL, ALPHA }
+private enum class MappingType { PINYIN, ZHUYIN, JAPANESE, SYMBOL, ALPHA, NUM }
 private enum class MappingMenuLevel { MAIN, DIAGONAL }
 
 private data class KeyEdit(
@@ -63,7 +65,7 @@ private data class KeyEdit(
     var upRight: String,
     var downLeft: String,
     var downRight: String,
-    val zoneName: String
+    var zoneName: String
 )
 
 @Composable
@@ -75,6 +77,7 @@ private fun KeyMappingScreen() {
             "zhuyin" -> MappingType.ZHUYIN
             "japanese" -> MappingType.JAPANESE
             "alpha" -> MappingType.ALPHA
+            "num" -> MappingType.NUM
             else -> MappingType.PINYIN
         }
     }
@@ -94,6 +97,9 @@ private fun KeyMappingScreen() {
             }
             MappingType.ALPHA -> KeyMapStore.loadAlphaKeys(context).map {
                 KeyEdit(it.center, it.left, it.up, it.right, it.down, it.upLeft, it.upRight, it.downLeft, it.downRight, "Alpha")
+            }
+            MappingType.NUM -> KeyMapStore.loadNumKeys(context).map {
+                KeyEdit(it.center, it.left, it.up, it.right, it.down, it.upLeft, it.upRight, it.downLeft, it.downRight, "Number")
             }
         }
     }
@@ -120,9 +126,12 @@ private fun KeyMappingScreen() {
                     "Kana"
                 } else if (mappingType == MappingType.ALPHA) {
                     "Alpha"
+                } else if (mappingType == MappingType.NUM) {
+                    "Number"
                 } else {
                     "Symbol"
                 }
+                val importedZone = o.optString("zone", o.optString("zoneName", zone)).ifBlank { zone }
                 edits.add(
                     KeyEdit(
                         center = o.optString("center", ""),
@@ -134,7 +143,7 @@ private fun KeyMappingScreen() {
                         upRight = o.optString("upRight", ""),
                         downLeft = o.optString("downLeft", ""),
                         downRight = o.optString("downRight", ""),
-                        zoneName = zone
+                        zoneName = importedZone
                     )
                 )
             }
@@ -159,6 +168,7 @@ private fun KeyMappingScreen() {
                         put("upRight", it.upRight)
                         put("downLeft", it.downLeft)
                         put("downRight", it.downRight)
+                        put("zone", it.zoneName)
                     }
                 )
             }
@@ -185,6 +195,7 @@ private fun KeyMappingScreen() {
             MappingType.JAPANESE -> "自定义日语假名12键映射"
             MappingType.SYMBOL -> "自定义符号12键映射"
             MappingType.ALPHA -> "自定义英文九宫格映射"
+            MappingType.NUM -> "自定义数字/四则运算映射"
         }
         Text(title, fontSize = 22.sp)
         if (mappingType == MappingType.ALPHA) {
@@ -238,7 +249,11 @@ private fun KeyMappingScreen() {
                     onLeft = { item.left = it },
                     onUp = { item.up = it },
                     onRight = { item.right = it },
-                    onDown = { item.down = it }
+                    onDown = { item.down = it },
+                    canEditZone = mappingType == MappingType.PINYIN || mappingType == MappingType.ZHUYIN,
+                    onToggleZone = {
+                        item.zoneName = if (item.zoneName == KeyZone.Shengmu.name) KeyZone.Yunmu.name else KeyZone.Shengmu.name
+                    }
                 )
             } else {
                 DiagonalEditCard(
@@ -276,6 +291,10 @@ private fun KeyMappingScreen() {
                     DefaultAlphaKeyMap.keys.forEach {
                         edits.add(KeyEdit(it.center, it.left, it.up, it.right, it.down, it.upLeft, it.upRight, it.downLeft, it.downRight, "Alpha"))
                     }
+                } else if (mappingType == MappingType.NUM) {
+                    DefaultNumKeyMap.keys.forEach {
+                        edits.add(KeyEdit(it.center, it.left, it.up, it.right, it.down, it.upLeft, it.upRight, it.downLeft, it.downRight, "Number"))
+                    }
                 } else {
                     val def = DefaultSymbolMap.keys
                     def.forEach {
@@ -299,7 +318,7 @@ private fun KeyMappingScreen() {
                             upRight = e.upRight,
                             downLeft = e.downLeft,
                             downRight = e.downRight,
-                            zone = old[i].zone
+                            zone = keyZoneFromName(e.zoneName, old[i].zone)
                         )
                     }
                     KeyMapStore.savePinyinKeys(context, newKeys)
@@ -316,7 +335,7 @@ private fun KeyMappingScreen() {
                             upRight = e.upRight,
                             downLeft = e.downLeft,
                             downRight = e.downRight,
-                            zone = old[i].zone
+                            zone = keyZoneFromName(e.zoneName, old[i].zone)
                         )
                     }
                     KeyMapStore.saveZhuyinKeys(context, newKeys)
@@ -352,6 +371,21 @@ private fun KeyMappingScreen() {
                         )
                     }
                     KeyMapStore.saveAlphaKeys(context, newKeys)
+                } else if (mappingType == MappingType.NUM) {
+                    val newKeys = edits.map { e ->
+                        DirectionalKeySpec(
+                            center = e.center,
+                            left = e.left,
+                            up = e.up,
+                            right = e.right,
+                            down = e.down,
+                            upLeft = e.upLeft,
+                            upRight = e.upRight,
+                            downLeft = e.downLeft,
+                            downRight = e.downRight
+                        )
+                    }
+                    KeyMapStore.saveNumKeys(context, newKeys)
                 } else {
                     val newKeys = edits.map { e ->
                         DirectionalKeySpec(
@@ -386,6 +420,7 @@ private fun KeyMappingScreen() {
                         MappingType.JAPANESE -> "cnflick_japanese_keymap.json"
                         MappingType.SYMBOL -> "cnflick_symbol_keymap.json"
                         MappingType.ALPHA -> "cnflick_alpha_keymap.json"
+                        MappingType.NUM -> "cnflick_number_keymap.json"
                     }
                     exportLauncher.launch(fileName)
                 },
@@ -408,7 +443,9 @@ private fun KeyEditCard(
     onLeft: (String) -> Unit,
     onUp: (String) -> Unit,
     onRight: (String) -> Unit,
-    onDown: (String) -> Unit
+    onDown: (String) -> Unit,
+    canEditZone: Boolean,
+    onToggleZone: () -> Unit
 ) {
     Column(
         modifier = Modifier
@@ -417,7 +454,12 @@ private fun KeyEditCard(
             .padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text("键 $index ($zoneName)")
+        Text("键 $index (${zoneLabel(zoneName)})")
+        if (canEditZone) {
+            OutlinedButton(onClick = onToggleZone, modifier = Modifier.fillMaxWidth()) {
+                Text("切换类别：${zoneLabel(zoneName)}")
+            }
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             SmallField("中", center, onCenter, Modifier.weight(1f))
             SmallField("左", left, onLeft, Modifier.weight(1f))
@@ -451,7 +493,7 @@ private fun DiagonalEditCard(
             .padding(10.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        Text("键 $index ($zoneName)")
+        Text("键 $index (${zoneLabel(zoneName)})")
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
             SmallField("左上", upLeft, onUpLeft, Modifier.weight(1f))
             SmallField("右上", upRight, onUpRight, Modifier.weight(1f))
@@ -476,4 +518,20 @@ private fun SmallField(label: String, value: String, onChange: (String) -> Unit,
         singleLine = true,
         modifier = modifier
     )
+}
+
+private fun zoneLabel(zoneName: String): String {
+    return when (zoneName) {
+        KeyZone.Shengmu.name -> "声母"
+        KeyZone.Yunmu.name -> "韵母"
+        else -> zoneName
+    }
+}
+
+private fun keyZoneFromName(zoneName: String, fallback: KeyZone): KeyZone {
+    return when (zoneName) {
+        KeyZone.Shengmu.name -> KeyZone.Shengmu
+        KeyZone.Yunmu.name -> KeyZone.Yunmu
+        else -> fallback
+    }
 }

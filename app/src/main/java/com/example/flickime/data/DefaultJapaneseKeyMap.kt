@@ -17,7 +17,7 @@ object DefaultJapaneseKeyMap {
         FlickKeySpec(center = "や", left = "ゃ", up = "ゆ", right = "ょ", down = "よ", zone = KeyZone.Yunmu),
         FlickKeySpec(center = "ら", left = "り", up = "る", right = "れ", down = "ろ", zone = KeyZone.Yunmu),
         FlickKeySpec(center = "、", left = "。", up = "？", right = "！", down = "…", zone = KeyZone.Yunmu),
-        FlickKeySpec(center = "わ", left = "を", up = "ん", right = "ー", down = "～", zone = KeyZone.Yunmu),
+        FlickKeySpec(center = " ", left = "を", up = "ん", right = "ー", down = "わ", zone = KeyZone.Yunmu),
         FlickKeySpec(center = "゛゜小", left = "", up = "", right = "", down = "", zone = KeyZone.Yunmu)
     )
 }

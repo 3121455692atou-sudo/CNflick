@@ -8,7 +8,7 @@ import java.text.Normalizer
 
 class PinyinEngine(private val context: Context) {
     private val dbName = "pinyin_dict_v2.db"
-    private val dbAssetVersion = 4
+    private val dbAssetVersion = 5
 
     private val db: SQLiteDatabase? by lazy {
         try {
@@ -36,6 +36,9 @@ class PinyinEngine(private val context: Context) {
     }
     private val phraseCache = object : LinkedHashMap<String, List<String>>(240, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<String>>?): Boolean = size > 240
+    }
+    private val initialCache = object : LinkedHashMap<String, List<String>>(160, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<String>>?): Boolean = size > 160
     }
 
     fun queryCandidates(pinyin: String, limit: Int = 10): List<String> {
@@ -153,6 +156,149 @@ class PinyinEngine(private val context: Context) {
         return out
     }
 
+    fun queryInitialCandidates(initials: List<String>, limit: Int = 10): List<String> {
+        val clean = initials.map { normalizePinyin(it) }.filter { it.isNotBlank() }
+        if (clean.isEmpty()) return emptyList()
+        val compact = clean.joinToString("") { initialCode(it) }
+        val versionTag = "lv${LexiconManager.getVersion(context)}-sv${ShortcutManager.getVersion(context)}"
+        val cacheKey = "$versionTag|initial:$compact#$limit"
+        synchronized(initialCache) {
+            initialCache[cacheKey]?.let { return it }
+        }
+
+        val shortcuts = ShortcutManager.query(context, compact, limit * 3)
+        val database = db
+        if (database == null) {
+            val out = shortcuts.distinct().take(limit)
+            synchronized(initialCache) { initialCache[cacheKey] = out }
+            return out
+        }
+
+        val codes = clean.map { initialCode(it) }
+        val fromDict = if (codes.size == 1) {
+            querySingleInitialCandidates(database, codes.first(), limit * 8)
+        } else {
+            queryInitialCandidatesFromFullPinyin(database, codes, limit * 8)
+        }
+        val out = (shortcuts + fromDict).distinct().take(limit)
+        synchronized(initialCache) { initialCache[cacheKey] = out }
+        return out
+    }
+
+    private fun queryInitialCandidatesFromFullPinyin(
+        database: SQLiteDatabase,
+        codes: List<String>,
+        limit: Int
+    ): List<String> {
+        if (codes.isEmpty()) return emptyList()
+        val fromIndex = queryInitialMaterializedIndex(database, codes, limit)
+        if (fromIndex.isNotEmpty()) return fromIndex
+        val pattern = buildInitialLikePattern(codes)
+        val scanLimit = (limit * 80).coerceAtLeast(2000).coerceAtMost(30000)
+        return try {
+            val out = mutableListOf<String>()
+            database.rawQuery(
+                """
+                SELECT pinyin, hanzi
+                FROM dict
+                WHERE pinyin LIKE ? AND length(hanzi) >= ${codes.size}
+                ORDER BY freq DESC
+                LIMIT $scanLimit
+                """.trimIndent(),
+                arrayOf(pattern)
+            ).use { c ->
+                while (c.moveToNext()) {
+                    val pinyin = c.getString(0)
+                    val hanzi = c.getString(1)
+                    if (matchesInitialCodes(pinyin, codes) && !out.contains(hanzi)) {
+                        out += hanzi
+                        if (out.size >= limit) break
+                    }
+                }
+            }
+            out
+        } catch (_: Throwable) {
+            emptyList()
+        }
+    }
+
+    private fun queryInitialMaterializedIndex(
+        database: SQLiteDatabase,
+        codes: List<String>,
+        limit: Int
+    ): List<String> {
+        val compact = codes.joinToString("")
+        return try {
+            val out = mutableListOf<String>()
+            database.rawQuery(
+                """
+                SELECT pinyin, hanzi
+                FROM initial_index
+                WHERE initials = ? AND length(hanzi) >= ${codes.size}
+                ORDER BY freq DESC
+                LIMIT ${limit * 4}
+                """.trimIndent(),
+                arrayOf(compact)
+            ).use { c ->
+                while (c.moveToNext()) {
+                    val pinyin = c.getString(0)
+                    val hanzi = c.getString(1)
+                    if (matchesInitialCodes(pinyin, codes) && !out.contains(hanzi)) {
+                        out += hanzi
+                        if (out.size >= limit) break
+                    }
+                }
+            }
+            out
+        } catch (_: Throwable) {
+            emptyList()
+        }
+    }
+
+    private fun buildInitialLikePattern(codes: List<String>): String {
+        return buildString {
+            append(codes.first())
+            codes.drop(1).forEach { code ->
+                append('%')
+                append(code)
+            }
+            append('%')
+        }
+    }
+
+    private fun querySingleInitialCandidates(
+        database: SQLiteDatabase,
+        code: String,
+        limit: Int
+    ): List<String> {
+        return try {
+            val fromIndex = mutableListOf<String>()
+            val scanLimit = (limit * 40).coerceAtLeast(800).coerceAtMost(12000)
+            database.rawQuery(
+                """
+                SELECT pinyin, hanzi
+                FROM dict
+                WHERE pinyin LIKE ? AND length(hanzi) = 1
+                ORDER BY freq DESC
+                LIMIT $scanLimit
+                """.trimIndent(),
+                arrayOf("$code%")
+            ).use { c ->
+                while (c.moveToNext()) {
+                    val pinyin = c.getString(0)
+                    val hanzi = c.getString(1)
+                    if (matchesInitialCodes(pinyin, listOf(code)) && !fromIndex.contains(hanzi)) {
+                        fromIndex += hanzi
+                        if (fromIndex.size >= limit) break
+                    }
+                }
+            }
+            fromIndex
+        } catch (_: Throwable) {
+            emptyList()
+        }
+    }
+
     fun recordUserChoice(pinyin: String, hanzi: String) {
         val query = normalizePinyin(pinyin)
         if (query.isBlank() || hanzi.isBlank()) return
@@ -169,6 +315,7 @@ class PinyinEngine(private val context: Context) {
         )
         synchronized(singleCache) { singleCache.clear() }
         synchronized(phraseCache) { phraseCache.clear() }
+        synchronized(initialCache) { initialCache.clear() }
     }
 
     private fun ensureDbCopied(): File {
@@ -222,10 +369,76 @@ class PinyinEngine(private val context: Context) {
         return (common[pinyin] ?: emptyList()).take(limit)
     }
 
+    private fun initialCode(initial: String): String {
+        return when (initial) {
+            "zh", "ch", "sh" -> initial.first().toString()
+            else -> initial
+        }
+    }
+
+    private fun matchesInitialCodes(pinyin: String, codes: List<String>): Boolean {
+        val normalized = normalizePinyin(pinyin)
+        if (normalized.isBlank() || codes.isEmpty()) return false
+        val normalizedCodes = codes.map { initialCode(it) }
+        val memo = HashSet<Pair<Int, Int>>()
+        fun dfs(offset: Int, index: Int): Boolean {
+            if (index == normalizedCodes.size) return offset == normalized.length
+            val state = offset to index
+            if (!memo.add(state)) return false
+            val syllables = syllablesByInitialCode[normalizedCodes[index]].orEmpty()
+            for (syllable in syllables) {
+                if (normalized.startsWith(syllable, offset) && dfs(offset + syllable.length, index + 1)) {
+                    return true
+                }
+            }
+            return false
+        }
+        return dfs(0, 0)
+    }
+
     private fun normalizePinyin(value: String): String {
         val toned = value.lowercase().replace("u:", "v").replace("ü", "v")
         val noMarks = Normalizer.normalize(toned, Normalizer.Form.NFD)
             .replace("\\p{M}+".toRegex(), "")
         return noMarks.filter { it in 'a'..'z' || it == 'v' }
+    }
+
+    companion object {
+        private val pinyinInitialsByCode = mapOf(
+            "b" to listOf("b"),
+            "p" to listOf("p"),
+            "m" to listOf("m"),
+            "f" to listOf("f"),
+            "d" to listOf("d"),
+            "t" to listOf("t"),
+            "n" to listOf("n"),
+            "l" to listOf("l"),
+            "g" to listOf("g"),
+            "k" to listOf("k"),
+            "h" to listOf("h"),
+            "j" to listOf("j"),
+            "q" to listOf("q"),
+            "x" to listOf("x"),
+            "r" to listOf("r"),
+            "z" to listOf("zh", "z"),
+            "c" to listOf("ch", "c"),
+            "s" to listOf("sh", "s"),
+            "y" to listOf("y"),
+            "w" to listOf("w")
+        )
+        private val pinyinFinals = listOf(
+            "a", "ai", "an", "ang", "ao",
+            "o", "ong", "ou",
+            "e", "ei", "en", "eng", "er",
+            "i", "ia", "ian", "iang", "iao", "ie", "in", "ing", "iong", "iu",
+            "u", "ua", "uai", "uan", "uang", "ue", "ui", "un", "uo",
+            "v", "ve", "van", "vn"
+        )
+        private val syllablesByInitialCode: Map<String, List<String>> = pinyinInitialsByCode.mapValues { (_, initials) ->
+            initials.flatMap { initial ->
+                pinyinFinals.map { initial + it }
+                    .plus(if (initial in setOf("m", "n")) listOf(initial) else emptyList())
+            }.distinct().sortedByDescending { it.length }
+        }
     }
 }

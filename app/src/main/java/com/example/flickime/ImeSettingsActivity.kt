@@ -249,12 +249,12 @@ private fun ImeSettingsScreen() {
         when (page) {
             SettingsPage.ROOT -> {
                 Text(text = "CNflick 设置", fontSize = 24.sp)
-                Text(text = "高级自定义中心")
+                Text(text = "常用项在上方，键位和词库在下方。")
 
-                Button(onClick = { page = SettingsPage.THEME }, modifier = Modifier.fillMaxWidth()) { Text("主题设置") }
-                Button(onClick = { page = SettingsPage.FONT }, modifier = Modifier.fillMaxWidth()) { Text("字体设置") }
-                Button(onClick = { page = SettingsPage.APPEARANCE }, modifier = Modifier.fillMaxWidth()) { Text("外观设置") }
-                Button(onClick = { page = SettingsPage.SOUND }, modifier = Modifier.fillMaxWidth()) { Text("按键音效设置") }
+                Button(onClick = { page = SettingsPage.THEME }, modifier = Modifier.fillMaxWidth()) { Text("主题与背景") }
+                Button(onClick = { page = SettingsPage.FONT }, modifier = Modifier.fillMaxWidth()) { Text("字体与颜色") }
+                Button(onClick = { page = SettingsPage.APPEARANCE }, modifier = Modifier.fillMaxWidth()) { Text("键盘布局与显示") }
+                Button(onClick = { page = SettingsPage.SOUND }, modifier = Modifier.fillMaxWidth()) { Text("按键音效") }
 
                 OutlinedButton(
                     onClick = {
@@ -292,6 +292,17 @@ private fun ImeSettingsScreen() {
                     onClick = {
                         context.startActivity(
                             Intent(context, KeyMappingActivity::class.java)
+                                .putExtra("map_type", "num")
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) { Text("自定义数字/四则运算映射") }
+
+                OutlinedButton(
+                    onClick = {
+                        context.startActivity(
+                            Intent(context, KeyMappingActivity::class.java)
                                 .putExtra("map_type", "zhuyin")
                                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                         )
@@ -320,10 +331,12 @@ private fun ImeSettingsScreen() {
                     },
                     modifier = Modifier.fillMaxWidth()
                 ) { Text("自定义英文九宫格映射") }
+
             }
 
             SettingsPage.THEME -> {
-                Text("主题设置", fontSize = 22.sp)
+                Text("主题与背景", fontSize = 22.sp)
+                Text("先选主题色，再选输入法背景和按键图片。当前预览：候选 你好 123")
                 Button(
                     onClick = { themePackPicker.launch(arrayOf("application/zip", "*/*")) },
                     modifier = Modifier.fillMaxWidth()
@@ -333,7 +346,7 @@ private fun ImeSettingsScreen() {
                     modifier = Modifier.fillMaxWidth()
                 ) { Text("仅导入主题色（兼容旧格式）") }
 
-                Text("主题色列表")
+                Text("1. 主题色")
                 allThemes.forEach { theme ->
                     val label = if (theme.id == currentThemeId) "✓ ${theme.name}" else theme.name
                     OutlinedButton(onClick = {
@@ -342,7 +355,7 @@ private fun ImeSettingsScreen() {
                         refreshThemePackState()
                     }, modifier = Modifier.fillMaxWidth()) { Text(label) }
                 }
-                Text("可切换主题包（预设 + 已导入）")
+                Text("2. 主题包")
                 if (importedThemePacks.isEmpty()) {
                     Text("暂无主题包", color = Color(0xFF64748B), fontSize = 13.sp)
                 } else {
@@ -363,9 +376,34 @@ private fun ImeSettingsScreen() {
                     }
                 }
 
+                Text("3. 背景图片")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    Button(onClick = { imeBgPicker.launch(arrayOf("image/*")) }, modifier = Modifier.weight(1f)) { Text("导入背景") }
+                    Button(onClick = { keyBgPicker.launch(arrayOf("image/*")) }, modifier = Modifier.weight(1f)) { Text("导入按键图") }
+                }
+
+                Text("输入法背景")
+                imeBgOptions.forEach { option ->
+                    val label = if (option.id == selectedImeBgId) "✓ ${option.name}" else option.name
+                    OutlinedButton(onClick = {
+                        BackgroundImageManager.selectImeBackground(context, option.id)
+                        selectedImeBgId = BackgroundImageManager.getSelectedImeId(context)
+                    }, modifier = Modifier.fillMaxWidth()) { Text(label) }
+                }
+
+                Text("按键图片")
+                keyBgOptions.forEach { option ->
+                    val label = if (option.id == selectedKeyBgId) "✓ ${option.name}" else option.name
+                    OutlinedButton(onClick = {
+                        BackgroundImageManager.selectKeyBackground(context, option.id)
+                        selectedKeyBgId = BackgroundImageManager.getSelectedKeyId(context)
+                    }, modifier = Modifier.fillMaxWidth()) { Text(label) }
+                }
+
                 OutlinedButton(onClick = {
                     ThemeManager.setCurrentTheme(context, "cnflick.theme.default_light")
                     ThemePackManager.clearCurrentPack(context)
+                    BackgroundImageManager.resetToDefaults(context)
                     refreshThemePackState()
                     Toast.makeText(context, "主题已恢复默认", Toast.LENGTH_SHORT).show()
                 }, modifier = Modifier.fillMaxWidth()) { Text("恢复默认主题") }
@@ -388,9 +426,20 @@ private fun ImeSettingsScreen() {
                     Toast.makeText(context, "字体已恢复默认", Toast.LENGTH_SHORT).show()
                 }, modifier = Modifier.fillMaxWidth()) { Text("恢复默认字体") }
 
-                Text("字体颜色（HEX，示例：#111827）")
-                Text("本输入法使用 HEX 颜色代码（#RRGGBB 或 #AARRGGBB）。")
-                Text("可在浏览器搜索“颜色代码 HEX”或“color picker hex”获取颜色值。")
+                Text("字体颜色")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+                    listOf("#111827" to "黑", "#FFFFFF" to "白", "#1677FF" to "蓝").forEach { (hex, name) ->
+                        OutlinedButton(
+                            onClick = {
+                                UiPrefs.setFontColorHex(context, hex)
+                                fontColorHex = UiPrefs.getFontColorHex(context)
+                                Toast.makeText(context, "字体颜色已应用：$name", Toast.LENGTH_SHORT).show()
+                            },
+                            modifier = Modifier.weight(1f)
+                        ) { Text(name) }
+                    }
+                }
+                Text("自定义 HEX（#RRGGBB 或 #AARRGGBB）")
                 OutlinedTextField(
                     value = fontColorHex,
                     onValueChange = { fontColorHex = it },
@@ -521,6 +570,17 @@ private fun ImeSettingsScreen() {
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Text(if (enabledInputLanguages.contains(InputLanguage.JAPANESE)) "✓ 日语假名" else "日语假名")
+                }
+                OutlinedButton(
+                    onClick = {
+                        updateLanguageEnabled(
+                            InputLanguage.SHAPE,
+                            !enabledInputLanguages.contains(InputLanguage.SHAPE)
+                        )
+                    },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(if (enabledInputLanguages.contains(InputLanguage.SHAPE)) "✓ 五笔/形码" else "五笔/形码")
                 }
 
                 Text("地球键显示模式")
@@ -687,7 +747,7 @@ private fun ImeSettingsScreen() {
 private fun actionKeyLabel(key: String): String {
     return when (key) {
         UiPrefs.ACTION_KEY_BACKSPACE -> "⌫ 删除"
-        UiPrefs.ACTION_KEY_SPACE -> "空格"
+        UiPrefs.ACTION_KEY_SPACE, UiPrefs.ACTION_KEY_VOICE -> "语音"
         UiPrefs.ACTION_KEY_ENTER -> "回车"
         UiPrefs.ACTION_KEY_FUNC -> "功能"
         else -> key

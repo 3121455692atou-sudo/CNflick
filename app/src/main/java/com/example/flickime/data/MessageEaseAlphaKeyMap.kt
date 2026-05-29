@@ -15,7 +15,7 @@ object MessageEaseAlphaKeyMap {
         DirectionalKeySpec(center = "e", left = "", up = "q", right = "z", down = "", upLeft = "", upRight = "", downLeft = "", downRight = ""),
         DirectionalKeySpec(center = "s", left = "", up = "", right = "", down = "", upLeft = "k", upRight = "", downLeft = "", downRight = ""),
         DirectionalKeySpec(center = ",", left = ";", up = "", right = "!", down = ""),
-        DirectionalKeySpec(center = "大写锁定", left = "", up = "", right = "", down = ""),
-        DirectionalKeySpec(center = "?", left = "\"", up = "", right = "-", down = "")
+        DirectionalKeySpec(center = " ", left = "", up = "", right = "", down = ""),
+        DirectionalKeySpec(center = "⇧", left = "?", up = "", right = "-", down = "\"")
     )
 }

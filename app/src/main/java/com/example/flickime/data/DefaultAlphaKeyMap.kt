@@ -15,7 +15,7 @@ object DefaultAlphaKeyMap {
         DirectionalKeySpec(center = "w", left = "v", up = "", right = "x", down = ""),
         DirectionalKeySpec(center = "z", left = "y", up = "", right = "'", down = ""),
         DirectionalKeySpec(center = ",", left = ";", up = "", right = ".", down = ""),
-        DirectionalKeySpec(center = "大写锁定", left = "", up = "", right = "", down = ""),
-        DirectionalKeySpec(center = "?", left = "!", up = "", right = "\"", down = "")
+        DirectionalKeySpec(center = " ", left = "", up = "", right = "", down = ""),
+        DirectionalKeySpec(center = "⇧", left = "?", up = "'", right = "!", down = "\"")
     )
 }
