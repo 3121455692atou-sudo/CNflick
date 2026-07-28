@@ -198,6 +198,9 @@ private fun KeyMappingScreen() {
             MappingType.NUM -> "自定义数字/四则运算映射"
         }
         Text(title, fontSize = 22.sp)
+        if (mappingType == MappingType.PINYIN) {
+            Text("标准声母、韵母会按每个映射值自动识别；移动到任意键位后仍可正常组合。键位类别仅用于无法识别的自定义内容。")
+        }
         if (mappingType == MappingType.ALPHA) {
             Text("英文键支持八方向；默认仅左/中/右有映射，其它方向留空。")
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {

@@ -13,6 +13,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
@@ -46,6 +48,7 @@ private fun SetupScreen() {
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFFF8FAFC))
+            .verticalScroll(rememberScrollState())
             .padding(20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
@@ -55,6 +58,7 @@ private fun SetupScreen() {
         Text(text = "3. 在任意输入框测试：先滑声母，再滑韵母，点候选上屏")
         Text(text = "使用小技巧：")
         Text(text = "• 删除键长按可连删，长按时上滑可一键清空当前输入")
+        Text(text = "• 候选词前出现 ↻ 表示拼音纠错；长按已学习候选可删除对应记录")
         Text(text = "• 拼音/符号八方向可以分别开关：拼音默认关，符号默认开")
         Text(text = "• 想用斜向滑动：先开八方向，再到映射页三级菜单配置斜向映射")
 

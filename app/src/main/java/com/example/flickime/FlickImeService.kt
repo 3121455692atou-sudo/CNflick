@@ -48,6 +48,7 @@ import com.example.flickime.data.KeyMapStore
 import com.example.flickime.engine.JapaneseEngine
 import com.example.flickime.engine.LexiconManager
 import com.example.flickime.engine.PinyinEngine
+import com.example.flickime.engine.PinyinTokenClassifier
 import com.example.flickime.engine.ShapeCodeManager
 import com.example.flickime.engine.ZhuyinConverter
 import com.example.flickime.model.FlickDirection
@@ -94,7 +95,8 @@ class FlickImeService : InputMethodService() {
         val text: String,
         val consumeSyllables: Int,
         val recordChoice: Boolean = true,
-        val replaceBeforeCursor: Int = 0
+        val replaceBeforeCursor: Int = 0,
+        val correctedPinyin: String? = null
     )
     private data class InitialContextQuery(
         val typedLength: Int,
@@ -202,15 +204,7 @@ class FlickImeService : InputMethodService() {
         listOf("た", "だ"), listOf("ち", "ぢ"), listOf("つ", "っ", "づ"), listOf("て", "で"), listOf("と", "ど"),
         listOf("は", "ば", "ぱ"), listOf("ひ", "び", "ぴ"), listOf("ふ", "ぶ", "ぷ"), listOf("へ", "べ", "ぺ"), listOf("ほ", "ぼ", "ぽ")
     )
-    private val pinyinInitialsForBackspace = listOf(
-        "zh", "ch", "sh",
-        "b", "p", "m", "f",
-        "d", "t", "n", "l",
-        "g", "k", "h",
-        "j", "q", "x",
-        "r", "z", "c", "s",
-        "y", "w"
-    )
+    private val pinyinInitialsForBackspace = PinyinTokenClassifier.initialsLongestFirst
     private val pinyinSeparatorCharsArray = charArrayOf('\'', '’', '‘', '＇', '`', '｀')
     private val zhuyinInitialsForBackspace = setOf(
         "ㄅ", "ㄆ", "ㄇ", "ㄈ",
@@ -1630,8 +1624,9 @@ class FlickImeService : InputMethodService() {
             composingText = buildComposingDisplay()
             return
         }
-        // 部分音节（如 ü/v）被放到声母区时，按韵母逻辑处理，允许首音节直接输入。
-        val actualZone = if (zone == KeyZone.Shengmu && isYunmuLikeToken(text)) KeyZone.Yunmu else zone
+        // 自定义布局可以把声母和韵母移动到任意物理键。标准拼音片段按内容
+        // 判定角色，避免 k + ao 被原物理键分区错误拆成 k'ao。
+        val actualZone = PinyinTokenClassifier.resolveZone(text, zone)
         when (actualZone) {
             KeyZone.Shengmu -> {
                 val pending = shengmuPart
@@ -1711,16 +1706,8 @@ class FlickImeService : InputMethodService() {
         return text in setOf("，", "。", "？", "！", "、", "！", ",", ".", "?", "!")
     }
 
-    private fun isYunmuLikeToken(text: String): Boolean {
-        if (text.isBlank()) return false
-        val t = text.lowercase(Locale.getDefault())
-            .replace("ü", "v")
-        return t == "v" || t == "er" || t.firstOrNull() in listOf('a', 'e', 'i', 'o', 'u')
-    }
-
     private fun isPinyinInitialToken(text: String): Boolean {
-        val normalized = text.lowercase(Locale.getDefault()).replace("ü", "v")
-        return pinyinInitialsForBackspace.contains(normalized)
+        return PinyinTokenClassifier.isInitial(text)
     }
 
     private fun isPinyinSeparatorToken(text: String): Boolean {
@@ -1804,7 +1791,8 @@ class FlickImeService : InputMethodService() {
         val rowItemBg = candidateItemBackground()
         allCandidates.take(12).forEach { candidate ->
             candidateRow.addView(TextView(this).apply {
-                text = candidate.text
+                text = candidateLabel(candidate)
+                contentDescription = candidateContentDescription(candidate)
                 textSize = 18f
                 setTypeface(activeTypeface, Typeface.NORMAL)
                 setTextColor(colorKeyText())
@@ -1818,6 +1806,10 @@ class FlickImeService : InputMethodService() {
                     commitCandidate(candidate)
                     if (mode == Mode.CANDIDATE) switchMode(Mode.FLICK)
                 }
+                setOnLongClickListener {
+                    removeLearnedCandidate(candidate)
+                    true
+                }
             })
         }
     }
@@ -1826,7 +1818,8 @@ class FlickImeService : InputMethodService() {
         candidateGrid.removeAllViews()
         allCandidates.take(48).forEach { candidate ->
             val item = TextView(this).apply {
-                text = candidate.text
+                text = candidateLabel(candidate)
+                contentDescription = candidateContentDescription(candidate)
                 textSize = 24f
                 setTypeface(activeTypeface, Typeface.NORMAL)
                 includeFontPadding = true
@@ -1840,12 +1833,58 @@ class FlickImeService : InputMethodService() {
                     commitCandidate(candidate)
                     switchMode(Mode.FLICK)
                 }
+                setOnLongClickListener {
+                    removeLearnedCandidate(candidate)
+                    true
+                }
             }
             candidateGrid.addView(item, GridLayout.LayoutParams().apply {
                 width = 0
                 height = ViewGroup.LayoutParams.WRAP_CONTENT
                 columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
             })
+        }
+    }
+
+    private fun candidateLabel(candidate: CandidateEntry): String {
+        return if (candidate.correctedPinyin == null) candidate.text else "↻${candidate.text}"
+    }
+
+    private fun candidateContentDescription(candidate: CandidateEntry): String {
+        val corrected = candidate.correctedPinyin
+        return if (corrected == null) {
+            "${candidate.text}，如为学习词条可长按删除记录"
+        } else {
+            "${candidate.text}，纠错拼音 $corrected，如为学习词条可长按删除记录"
+        }
+    }
+
+    private fun removeLearnedCandidate(candidate: CandidateEntry) {
+        if (currentInputLanguage != InputLanguage.PINYIN && currentInputLanguage != InputLanguage.ZHUYIN) {
+            Toast.makeText(this, "当前候选不使用拼音学习记录", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val query = if (composingSessionFullQuery.isNotBlank()) {
+            composingSessionFullQuery
+        } else {
+            buildSyllablesForCandidates().joinToString("")
+        }
+        if (query.isBlank()) {
+            Toast.makeText(this, "当前没有可删除的学习记录", Toast.LENGTH_SHORT).show()
+            return
+        }
+        candidateExecutor.execute {
+            val deleted = runCatching {
+                pinyinEngine.deleteUserChoice(query, candidate.text)
+            }.getOrDefault(false)
+            mainHandler.post {
+                if (deleted) {
+                    Toast.makeText(this, "已删除“${candidate.text}”的学习记录", Toast.LENGTH_SHORT).show()
+                    requestCandidatesAsync()
+                } else {
+                    Toast.makeText(this, "这不是已学习词条，基础词库不会被删除", Toast.LENGTH_SHORT).show()
+                }
+            }
         }
     }
 
@@ -2531,7 +2570,21 @@ class FlickImeService : InputMethodService() {
                         pinyinEngine.queryInitialCandidates(syllables, 48)
                             .map { CandidateEntry(it, syllables.size, recordChoice = false) }
                     } else if (syllables.size <= 1) {
-                        pinyinEngine.queryCandidates(query, 48).map { CandidateEntry(it, 1) }
+                        val exact = pinyinEngine.queryCandidates(query, 48)
+                        val corrected = if (exact.size < 3) {
+                            pinyinEngine.queryCorrectionCandidatesForSyllables(syllables, 16)
+                                .filterNot { it.text in exact }
+                        } else {
+                            emptyList()
+                        }
+                        exact.map { CandidateEntry(it, 1) } +
+                            corrected.map {
+                                CandidateEntry(
+                                    text = it.text,
+                                    consumeSyllables = 1,
+                                    correctedPinyin = it.correctedPinyin
+                                )
+                            }
                     } else {
                         computeMultiSyllableCandidates(syllables)
                     }
@@ -2654,11 +2707,43 @@ class FlickImeService : InputMethodService() {
         }
 
         val fullQuery = syllables.joinToString("")
-        pinyinEngine.queryCandidates(fullQuery, 16).forEach { text ->
+        val exactFull = pinyinEngine.queryCandidates(fullQuery, 16)
+        exactFull.forEach { text ->
             if (text.length >= 2) addCandidate(text, size)
         }
 
+        val corrections = if (exactFull.count { it.length >= 2 } < 3) {
+            pinyinEngine.queryCorrectionCandidatesForSyllables(syllables, 16)
+                .filter { it.text.length >= 2 }
+        } else {
+            emptyList()
+        }
+        val hasUnknownSyllable = corrections.isNotEmpty() && pinyinEngine.hasUnknownSyllable(syllables)
+        if (hasUnknownSyllable) {
+            corrections.forEach {
+                if (out.none { entry -> entry.text == it.text }) {
+                    out += CandidateEntry(
+                        text = it.text,
+                        consumeSyllables = size,
+                        correctedPinyin = it.correctedPinyin
+                    )
+                }
+            }
+        }
+
         buildGreedySentenceCandidate(syllables)?.let { addCandidate(it, size) }
+
+        if (!hasUnknownSyllable) {
+            corrections.forEach {
+                if (out.none { entry -> entry.text == it.text }) {
+                    out += CandidateEntry(
+                        text = it.text,
+                        consumeSyllables = size,
+                        correctedPinyin = it.correctedPinyin
+                    )
+                }
+            }
+        }
 
         val maxPrefix = minOf(size, 6)
         for (consume in maxPrefix downTo 1) {
@@ -2771,6 +2856,7 @@ class FlickImeService : InputMethodService() {
                 if (token != candidateToken.get()) return@post
                 allCandidates = result
                 refreshCandidateViews()
+                if (mode == Mode.CANDIDATE) refreshCandidateGrid()
             }
         }
     }

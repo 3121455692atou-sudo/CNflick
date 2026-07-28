@@ -60,6 +60,8 @@ dependencies {
     implementation("androidx.compose.foundation:foundation")
     implementation("com.bihe0832.android:lib-sherpa-onnx:6.25.21")
 
+    testImplementation("junit:junit:4.13.2")
+
     debugImplementation("androidx.compose.ui:ui-tooling")
     debugImplementation("androidx.compose.ui:ui-test-manifest")
 }
