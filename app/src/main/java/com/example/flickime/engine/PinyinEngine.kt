@@ -3,10 +3,15 @@ package com.example.flickime.engine
 import android.content.Context
 import android.database.sqlite.SQLiteDatabase
 import java.io.File
-import java.util.LinkedHashMap
 import java.text.Normalizer
+import java.util.LinkedHashMap
 
 class PinyinEngine(private val context: Context) {
+    data class CorrectionCandidate(
+        val text: String,
+        val correctedPinyin: String
+    )
+
     private val dbName = "pinyin_dict_v2.db"
     private val dbAssetVersion = 5
 
@@ -40,6 +45,9 @@ class PinyinEngine(private val context: Context) {
     private val initialCache = object : LinkedHashMap<String, List<String>>(160, 0.75f, true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<String>>?): Boolean = size > 160
     }
+
+    @Volatile
+    private var syllableFrequencyCache: Map<String, Int>? = null
 
     fun queryCandidates(pinyin: String, limit: Int = 10): List<String> {
         val query = normalizePinyin(pinyin)
@@ -313,6 +321,97 @@ class PinyinEngine(private val context: Context) {
             """.trimIndent(),
             arrayOf(query, hanzi, now)
         )
+        clearCandidateCaches()
+    }
+
+    fun deleteUserChoice(pinyin: String, hanzi: String): Boolean {
+        val query = normalizePinyin(pinyin)
+        if (query.isBlank() || hanzi.isBlank()) return false
+        val database = db ?: return false
+        val deleted = database.delete(
+            "user_choice",
+            "pinyin = ? AND hanzi = ?",
+            arrayOf(query, hanzi)
+        ) > 0
+        if (deleted) clearCandidateCaches()
+        return deleted
+    }
+
+    fun hasUnknownSyllable(syllables: List<String>): Boolean {
+        val clean = syllables.map(::normalizePinyin).filter { it.isNotBlank() }
+        if (clean.isEmpty()) return false
+        val known = loadSyllableFrequencies().keys
+        return clean.any { it !in known }
+    }
+
+    fun queryCorrectionCandidatesForSyllables(
+        syllables: List<String>,
+        limit: Int = 10
+    ): List<CorrectionCandidate> {
+        if (limit <= 0) return emptyList()
+        val clean = syllables.map(::normalizePinyin).filter { it.isNotBlank() }
+        if (clean.isEmpty()) return emptyList()
+        val database = db ?: return emptyList()
+        val corrections = PinyinCorrectionMatcher.buildQueries(clean, loadSyllableFrequencies())
+        if (corrections.isEmpty()) return emptyList()
+
+        val correctionByQuery = corrections.associateBy { it.query }
+        val placeholders = corrections.joinToString(",") { "?" }
+        val scanLimit = (limit * 40).coerceAtLeast(160).coerceAtMost(600)
+        val ranked = mutableListOf<Triple<String, String, Int>>()
+        database.rawQuery(
+            """
+            SELECT pinyin, hanzi, freq
+            FROM dict
+            WHERE pinyin IN ($placeholders)
+            ORDER BY freq DESC
+            LIMIT $scanLimit
+            """.trimIndent(),
+            corrections.map { it.query }.toTypedArray()
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                ranked += Triple(cursor.getString(0), cursor.getString(1), cursor.getInt(2))
+            }
+        }
+
+        val out = mutableListOf<CorrectionCandidate>()
+        ranked.sortedWith(
+            compareBy<Triple<String, String, Int>> {
+                correctionByQuery[it.first]?.priority ?: Int.MAX_VALUE
+            }.thenByDescending { it.third }
+        ).forEach { (query, text, _) ->
+            if (text.isBlank() || out.any { it.text == text }) return@forEach
+            val corrected = correctionByQuery[query] ?: return@forEach
+            out += CorrectionCandidate(text, corrected.syllables.joinToString("'"))
+            if (out.size >= limit) return out
+        }
+        return out
+    }
+
+    private fun loadSyllableFrequencies(): Map<String, Int> {
+        syllableFrequencyCache?.let { return it }
+        val database = db ?: return emptyMap()
+        val loaded = LinkedHashMap<String, Int>()
+        database.rawQuery(
+            """
+            SELECT pinyin, MAX(freq)
+            FROM dict
+            WHERE length(hanzi) = 1
+              AND length(pinyin) BETWEEN 1 AND 6
+            GROUP BY pinyin
+            """.trimIndent(),
+            emptyArray()
+        ).use { cursor ->
+            while (cursor.moveToNext()) {
+                val pinyin = normalizePinyin(cursor.getString(0))
+                if (pinyin.isNotBlank()) loaded[pinyin] = cursor.getInt(1)
+            }
+        }
+        syllableFrequencyCache = loaded
+        return loaded
+    }
+
+    private fun clearCandidateCaches() {
         synchronized(singleCache) { singleCache.clear() }
         synchronized(phraseCache) { phraseCache.clear() }
         synchronized(initialCache) { initialCache.clear() }
